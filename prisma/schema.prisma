@@ -1,0 +1,74 @@
+// Standalone game backend schema (Postgres). Decoupled from inj-pass-backend.
+// Normalized: Player (account + leaderboard snapshot + prefs), Position (per-asset),
+// TradeLog (append-only history), AuthNonce (login challenge).
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Player {
+  walletAddress         String   @id
+  walletName            String?
+
+  // Account scalars
+  cash                  Float
+  debt                  Float
+  accruedInterest       Float    @default(0)
+  lastInterestAccruedAt Float
+  liquidated            Boolean  @default(false)
+  leverage              Int      @default(1)
+
+  // Leaderboard snapshot (computed client-side at save time using live prices)
+  netWorth              Float
+  pnl                   Float
+  holdingsValue         Float
+
+  // UI preferences (synced across devices)
+  locale                String   @default("zh")
+  sound                 Boolean  @default(true)
+  sort                  String   @default("featured")
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  positions             Position[]
+  trades                TradeLog[]
+
+  @@index([pnl]) // loss leaderboard ordering (ascending = biggest loss first)
+}
+
+model Position {
+  id            Int    @id @default(autoincrement())
+  player        Player @relation(fields: [walletAddress], references: [walletAddress], onDelete: Cascade)
+  walletAddress String
+  productId     String
+  quantity      Float
+  costBasis     Float
+
+  @@unique([walletAddress, productId])
+}
+
+model TradeLog {
+  id            BigInt   @id @default(autoincrement())
+  player        Player   @relation(fields: [walletAddress], references: [walletAddress], onDelete: Cascade)
+  walletAddress String
+  ts            Float // client monotonic timestamp; used for idempotent incremental insert
+  title         String
+  detail        String
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress, ts])
+}
+
+model AuthNonce {
+  walletAddress String   @id
+  nonce         String
+  message       String
+  expiresAt     DateTime
+
+  @@index([expiresAt])
+}
