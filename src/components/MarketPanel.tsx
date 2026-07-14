@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { GameState, Product, SortMode } from "@/types";
+import type { TradeSide } from "@/game/engine";
 import { useGame } from "@/state/GameProvider";
 import { t, labelFrom } from "@/i18n";
 import { CATEGORY_LABELS, SUBCATEGORY_LABELS } from "@/data/categoryLabels";
@@ -57,6 +58,11 @@ export function MarketPanel() {
   const visible = useMemo(() => getVisibleProducts(state), [state]);
   const subcategories = getSubcategoriesForCategory(state.selectedCategory);
   const balance = getBalance(state);
+
+  // Only one trade ticket open at a time (mirrors the prototype's activeTrade).
+  const [activeTrade, setActiveTrade] = useState<{ id: string; side: TradeSide } | null>(null);
+  const openTicket = useCallback((id: string, side: TradeSide) => setActiveTrade({ id, side }), []);
+  const closeTicket = useCallback(() => setActiveTrade(null), []);
 
   return (
     <section className="market-panel" aria-labelledby="marketTitle">
@@ -121,7 +127,6 @@ export function MarketPanel() {
             value={state.sort}
             onChange={(e) => actions.setSort(e.target.value as SortMode)}
           >
-            <option value="featured">{t(locale, "featured")}</option>
             <option value="price-asc">{t(locale, "priceAsc")}</option>
             <option value="price-desc">{t(locale, "priceDesc")}</option>
             <option value="owned">{t(locale, "owned")}</option>
@@ -146,9 +151,10 @@ export function MarketPanel() {
               selected={focusedProductId === product.id}
               liquidated={state.liquidated}
               locale={locale}
-              onBuy={actions.buy}
+              activeSide={activeTrade?.id === product.id ? activeTrade.side : null}
+              onOpenTicket={openTicket}
+              onCloseTicket={closeTicket}
               onMax={actions.buyMax}
-              onSell={actions.sell}
               onSellAll={actions.sellAll}
             />
           );

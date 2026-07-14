@@ -7,9 +7,9 @@ import { InjPassProvider } from "@/wallet/InjPassProvider";
 import { t } from "@/i18n";
 import { TopBar } from "./TopBar";
 import { FxTicker } from "./FxTicker";
+import { SessionBar } from "./SessionBar";
 import { PortfolioPanel } from "./PortfolioPanel";
 import { MarketPanel } from "./MarketPanel";
-import { FinancePanel } from "./FinancePanel";
 
 function GameShell() {
   const { state, ready } = useGame();
@@ -23,10 +23,10 @@ function GameShell() {
     <div className="app-shell">
       <TopBar />
       <FxTicker />
+      <SessionBar />
       <main className="dashboard-grid">
         <PortfolioPanel />
         <MarketPanel />
-        <FinancePanel />
       </main>
       {!ready && <span hidden aria-hidden="true" data-loading="true" />}
     </div>

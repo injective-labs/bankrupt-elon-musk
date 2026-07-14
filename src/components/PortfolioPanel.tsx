@@ -1,14 +1,17 @@
 "use client";
 
+import { useMemo } from "react";
 import { useGame } from "@/state/GameProvider";
 import { useCloudSync } from "@/state/CloudSyncProvider";
 import { t } from "@/i18n";
-import { STARTING_BALANCE } from "@/data/constants";
+import { STARTING_BALANCE, FX_DISPLAY_ORDER, FALLBACK_FX } from "@/data/constants";
 import { productById } from "@/data/expandedAssets";
-import { formatCurrency, formatNumber, formatPercentValue } from "@/game/format";
+import { getInvestmentProducts } from "@/data/categories";
+import { formatCurrency, formatNumber, formatPercentValue, formatFxRate } from "@/game/format";
 import {
   getBalance,
   getNetWorth,
+  getHoldingsValue,
   getPnl,
   getLossRanking,
   getProductPrice,
@@ -25,8 +28,10 @@ export function PortfolioPanel() {
 
   const cash = getBalance(state);
   const netWorth = getNetWorth(state);
+  const assetBalance = getHoldingsValue(state);
   const pnl = getPnl(state);
   const returnRatio = pnl / STARTING_BALANCE;
+  const pnlTone = pnl > 0 ? "positive" : pnl < 0 ? "negative" : "neutral";
 
   // Real leaderboard rank when connected; otherwise the simulated ranking.
   const you = leaderboard?.you;
@@ -53,6 +58,19 @@ export function PortfolioPanel() {
       }
     : getLossRanking(state);
 
+  // FX rates for the currencies actually used by tradeable assets (non-USD).
+  const displayedFx = useMemo(() => {
+    const active = new Set<string>();
+    getInvestmentProducts().forEach((product) => {
+      const declared = product.currency || "USD";
+      const quote = state.prices?.[product.id]?.currency;
+      [declared, quote].forEach((currency) => {
+        if (currency && currency !== "USD") active.add(currency);
+      });
+    });
+    return FX_DISPLAY_ORDER.filter(([currency]) => active.has(currency));
+  }, [state.prices]);
+
   const entries = Object.entries(state.inventory)
     .map(([id, position]) => ({ product: productById.get(id), position }))
     .filter((entry): entry is { product: Product; position: Position } => Boolean(entry.product))
@@ -76,15 +94,22 @@ export function PortfolioPanel() {
 
       <div className="money-stack">
         <div className="metric primary">
-          <span>{t(locale, "netWorth")}</span>
+          <span className="net-worth-label">
+            <b>{t(locale, "netWorth")}</b>
+            <em>{t(locale, "netWorthFormula")}</em>
+          </span>
           <strong>{formatCurrency(netWorth)}</strong>
         </div>
-        <div className="metric-grid">
-          <div className="metric">
+        <div className="metric-grid metric-led-list">
+          <div className="metric metric-led">
             <span>{t(locale, "cashBalance")}</span>
             <strong>{formatCurrency(cash)}</strong>
           </div>
-          <div className="metric">
+          <div className="metric metric-led">
+            <span>{t(locale, "assetBalance")}</span>
+            <strong>{formatCurrency(assetBalance, assetBalance >= 1_000_000_000)}</strong>
+          </div>
+          <div className={`metric metric-led pnl-metric ${pnlTone}`}>
             <span>{t(locale, "totalPnl")}</span>
             <strong>{formatCurrency(pnl, Math.abs(pnl) >= 1_000_000_000)}</strong>
           </div>
@@ -103,6 +128,29 @@ export function PortfolioPanel() {
           />
         </div>
       </div>
+
+      {displayedFx.length > 0 && (
+        <div className="exchange-panel" aria-labelledby="exchangeTitle">
+          <div className="exchange-heading">
+            <strong id="exchangeTitle">{t(locale, "exchangeRates")}</strong>
+            <span>{t(locale, "exchangeDaily")}</span>
+          </div>
+          <div className="exchange-list">
+            {displayedFx.map(([currency, label]) => {
+              const rate = state.fxRates[currency] || FALLBACK_FX[currency];
+              return (
+                <div className="exchange-row" key={currency}>
+                  <span>
+                    <b>{locale === "en" ? label.en : label.zh}</b>
+                    <em>{currency}/USD</em>
+                  </span>
+                  <strong>{formatFxRate(currency, rate)}</strong>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="status-card">
         <span

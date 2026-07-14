@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
-import { requireWallet } from "@/server/session";
+import { walletFromQuery } from "@/server/wallet";
 import type { LeaderboardRow } from "@/types";
 
 export const runtime = "nodejs";
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   }));
 
   let you: { rank: number; total: number; pnl: number } | null = null;
-  const wallet = await requireWallet(request);
+  const wallet = walletFromQuery(request);
   if (wallet) {
     const me = await prisma.player.findUnique({
       where: { walletAddress: wallet },

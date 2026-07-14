@@ -25,29 +25,28 @@ import {
   borrowMoney,
   repayMoney,
   settleOneDayInterest,
-  randomSpend as engineRandomSpend,
   clampLeverage,
-  getSpent,
   getPriceSourceSummary,
   addLog,
   makeEffects,
   type Effects,
 } from "@/game/engine";
 import { refreshPrices } from "@/game/pricing";
-import { shouldRefreshPrices } from "@/game/marketClock";
+import { shouldRefreshPrices, isSettlementLocked } from "@/game/marketClock";
 import { createInitialState, loadState, saveState } from "./persistence";
 import { useSound } from "@/sound/useSound";
 
 export interface GameActions {
   buy: (id: string) => void;
+  buyQty: (id: string, quantity: number) => void;
   buyMax: (id: string) => void;
   sell: (id: string) => void;
+  sellQty: (id: string, quantity: number) => void;
   sellAll: (id: string) => void;
   setLeverage: (value: number) => void;
   borrow: (amount: number | null) => void;
   repay: (amount: number | null) => void;
   settleInterest: () => void;
-  randomSpend: () => void;
   reset: () => void;
   clearLog: () => void;
   toggleSound: () => void;
@@ -65,7 +64,6 @@ interface GameContextValue {
   state: GameState;
   actions: GameActions;
   focusedProductId: string | null;
-  resetArmed: boolean;
   flashTick: number;
   ready: boolean;
 }
@@ -83,9 +81,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef<GameState>(state);
   const [ready, setReady] = useState(false);
   const [focusedProductId, setFocusedProductId] = useState<string | null>(null);
-  const [resetArmed, setResetArmed] = useState(false);
   const [flashTick, setFlashTick] = useState(0);
-  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playSound = useSound();
 
   // Runs a mutation on a cloned state, mirroring the original renderAll():
@@ -108,6 +104,22 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
     },
     [playSound],
+  );
+
+  // Trade/bank actions are blocked during the daily HKT clearing window; instead
+  // of committing the mutation we log the halt and play an error sound.
+  const tradeCommit = useCallback(
+    (mutator: (state: GameState, effects: Effects) => void) => {
+      if (isSettlementLocked()) {
+        commit((s, e) => {
+          addLog(s, t(s.locale, "settlementBlocked"), t(s.locale, "settlementTooltip"));
+          e.sounds.push("error");
+        });
+        return;
+      }
+      commit(mutator);
+    },
+    [commit],
   );
 
   const refreshPricesNow = useCallback(async () => {
@@ -145,17 +157,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Confirmation is handled by ResetDialog; this just performs the reset,
+  // preserving language/sound/prices. Kept self-contained for easy future removal.
   const reset = useCallback(() => {
     const current = stateRef.current;
-    if ((getSpent(current) > 0 || current.log.length) && !resetArmed) {
-      setResetArmed(true);
-      if (resetTimer.current) clearTimeout(resetTimer.current);
-      resetTimer.current = setTimeout(() => setResetArmed(false), 2400);
-      if (current.sound) playSound("refund");
-      return;
-    }
-    if (resetTimer.current) clearTimeout(resetTimer.current);
-    setResetArmed(false);
     const next = createInitialState();
     next.locale = current.locale;
     next.sound = current.sound;
@@ -167,7 +172,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     saveState(next);
     setFocusedProductId(null);
     if (next.sound) playSound("reset");
-  }, [resetArmed, playSound]);
+  }, [playSound]);
 
   // Adopt an externally-sourced state (e.g. cloud save). Merged over defaults so a
   // partial/older payload can't crash the UI.
@@ -200,17 +205,18 @@ export function GameProvider({ children }: { children: ReactNode }) {
   );
 
   const actions: GameActions = useMemo(() => ({
-    buy: (id) => commit((s, e) => buyProduct(s, id, 1, e)),
-    buyMax: (id) => commit((s, e) => engineBuyMax(s, id, e)),
-    sell: (id) => commit((s, e) => sellProduct(s, id, 1, e)),
-    sellAll: (id) => commit((s, e) => sellAllProduct(s, id, e)),
+    buy: (id) => tradeCommit((s, e) => buyProduct(s, id, 1, e)),
+    buyQty: (id, quantity) => tradeCommit((s, e) => buyProduct(s, id, quantity, e)),
+    buyMax: (id) => tradeCommit((s, e) => engineBuyMax(s, id, e)),
+    sell: (id) => tradeCommit((s, e) => sellProduct(s, id, 1, e)),
+    sellQty: (id, quantity) => tradeCommit((s, e) => sellProduct(s, id, quantity, e)),
+    sellAll: (id) => tradeCommit((s, e) => sellAllProduct(s, id, e)),
     setLeverage: (value) => commit((s) => {
       s.leverage = clampLeverage(value);
     }),
-    borrow: (amount) => commit((s, e) => borrowMoney(s, amount, e)),
-    repay: (amount) => commit((s, e) => repayMoney(s, amount, e)),
-    settleInterest: () => commit((s, e) => settleOneDayInterest(s, e)),
-    randomSpend: () => commit((s, e) => engineRandomSpend(s, e)),
+    borrow: (amount) => tradeCommit((s, e) => borrowMoney(s, amount, e)),
+    repay: (amount) => tradeCommit((s, e) => repayMoney(s, amount, e)),
+    settleInterest: () => tradeCommit((s, e) => settleOneDayInterest(s, e)),
     reset,
     clearLog: () => commit((s, e) => {
       s.log = [];
@@ -241,11 +247,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
     focusProduct,
     refreshPricesNow: () => void refreshPricesNow(),
     replaceState,
-  }), [commit, reset, focusProduct, refreshPricesNow, replaceState]);
+  }), [commit, tradeCommit, reset, focusProduct, refreshPricesNow, replaceState]);
 
   return (
     <GameContext.Provider
-      value={{ state, actions, focusedProductId, resetArmed, flashTick, ready }}
+      value={{ state, actions, focusedProductId, flashTick, ready }}
     >
       {children}
     </GameContext.Provider>

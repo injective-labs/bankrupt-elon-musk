@@ -1,9 +1,9 @@
 import type { Locale } from "@/types";
 import {
-  NEW_YORK_TZ,
   HONG_KONG_TZ,
-  MARKET_CLOSE_HOUR_NY,
-  MARKET_CLOSE_MINUTE_NY,
+  MARKET_CLOSE_HOUR_HKT,
+  MARKET_CLOSE_MINUTE_HKT,
+  SETTLEMENT_WINDOW_MS,
 } from "@/data/constants";
 
 interface ZonedParts {
@@ -52,15 +52,6 @@ function getCalendarDateOffset(
   };
 }
 
-function getCalendarWeekday(dateParts: { year: number; month: number; day: number }): number {
-  return new Date(Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day)).getUTCDay();
-}
-
-function isWeekday(dateParts: { year: number; month: number; day: number }): boolean {
-  const weekday = getCalendarWeekday(dateParts);
-  return weekday >= 1 && weekday <= 5;
-}
-
 function makeUtcFromZonedTime(
   dateParts: { year: number; month: number; day: number; hour: number; minute: number; second?: number },
   timeZone: string,
@@ -100,34 +91,114 @@ function getMarketCloseForDate(dateParts: { year: number; month: number; day: nu
   return makeUtcFromZonedTime(
     {
       ...dateParts,
-      hour: MARKET_CLOSE_HOUR_NY,
-      minute: MARKET_CLOSE_MINUTE_NY,
+      hour: MARKET_CLOSE_HOUR_HKT,
+      minute: MARKET_CLOSE_MINUTE_HKT,
       second: 0,
     },
-    NEW_YORK_TZ,
+    HONG_KONG_TZ,
   );
 }
 
 export function getNextMarketClose(now: Date = new Date()): Date {
-  const nyToday = getZonedParts(now, NEW_YORK_TZ);
-  for (let offset = 0; offset <= 10; offset += 1) {
-    const dateParts = getCalendarDateOffset(nyToday, offset);
-    if (!isWeekday(dateParts)) continue;
+  const hktToday = getZonedParts(now, HONG_KONG_TZ);
+  for (let offset = 0; offset <= 2; offset += 1) {
+    const dateParts = getCalendarDateOffset(hktToday, offset);
     const close = getMarketCloseForDate(dateParts);
     if (close > now) return close;
   }
-  return getMarketCloseForDate(getCalendarDateOffset(nyToday, 1));
+  return getMarketCloseForDate(getCalendarDateOffset(hktToday, 1));
 }
 
 export function getPreviousMarketClose(now: Date = new Date()): Date | null {
-  const nyToday = getZonedParts(now, NEW_YORK_TZ);
-  for (let offset = 0; offset >= -10; offset -= 1) {
-    const dateParts = getCalendarDateOffset(nyToday, offset);
-    if (!isWeekday(dateParts)) continue;
+  const hktToday = getZonedParts(now, HONG_KONG_TZ);
+  for (let offset = 0; offset >= -2; offset -= 1) {
+    const dateParts = getCalendarDateOffset(hktToday, offset);
     const close = getMarketCloseForDate(dateParts);
     if (close <= now) return close;
   }
   return null;
+}
+
+// --- Trading session / settlement window (ported from the prototype) ---
+
+export interface SessionSegment {
+  start: Date;
+  end: Date;
+}
+
+export interface TradingSessionState {
+  locked: boolean;
+  nextClose: Date;
+  anchorClose: Date;
+  settlementStart: Date;
+  settlementEnd: Date;
+  segments: {
+    before: SessionSegment;
+    settlement: SessionSegment;
+    after: SessionSegment;
+  };
+  countdownTarget: Date;
+  markerPercent: number;
+}
+
+export function getTradingSessionState(now: Date = new Date()): TradingSessionState {
+  const nextClose = getNextMarketClose(now);
+  const previousClose = getPreviousMarketClose(now);
+  const upcomingStart = new Date(nextClose.getTime() - SETTLEMENT_WINDOW_MS);
+  const upcomingEnd = new Date(nextClose.getTime() + SETTLEMENT_WINDOW_MS);
+  const previousStart = previousClose ? new Date(previousClose.getTime() - SETTLEMENT_WINDOW_MS) : null;
+  const previousEnd = previousClose ? new Date(previousClose.getTime() + SETTLEMENT_WINDOW_MS) : null;
+  const inUpcomingWindow = now >= upcomingStart && now <= upcomingEnd;
+  const inPreviousWindow = Boolean(
+    previousStart && previousEnd && now >= previousStart && now <= previousEnd,
+  );
+  const anchorClose = inPreviousWindow && previousClose ? previousClose : nextClose;
+  const settlementStart = new Date(anchorClose.getTime() - SETTLEMENT_WINDOW_MS);
+  const settlementEnd = new Date(anchorClose.getTime() + SETTLEMENT_WINDOW_MS);
+  const closeBeforeAnchor = getPreviousMarketClose(new Date(anchorClose.getTime() - 1));
+  const closeAfterAnchor = getNextMarketClose(new Date(anchorClose.getTime() + 1));
+  const segmentBeforeStart = closeBeforeAnchor
+    ? new Date(closeBeforeAnchor.getTime() + SETTLEMENT_WINDOW_MS)
+    : new Date(settlementStart.getTime() - 1);
+  const segmentAfterEnd = new Date(closeAfterAnchor.getTime() - SETTLEMENT_WINDOW_MS);
+  const locked = Boolean(inUpcomingWindow || inPreviousWindow);
+  const tradingStart = segmentBeforeStart;
+  const tradingEnd = settlementStart;
+  const tradingProgress =
+    tradingEnd > tradingStart
+      ? Math.min(
+          1,
+          Math.max(0, (now.getTime() - tradingStart.getTime()) / (tradingEnd.getTime() - tradingStart.getTime())),
+        )
+      : 0;
+  const settlementProgress =
+    settlementEnd > settlementStart
+      ? Math.min(
+          1,
+          Math.max(
+            0,
+            (now.getTime() - settlementStart.getTime()) / (settlementEnd.getTime() - settlementStart.getTime()),
+          ),
+        )
+      : 0;
+  return {
+    locked,
+    nextClose,
+    anchorClose,
+    settlementStart,
+    settlementEnd,
+    segments: {
+      before: { start: segmentBeforeStart, end: settlementStart },
+      settlement: { start: settlementStart, end: settlementEnd },
+      after: { start: settlementEnd, end: segmentAfterEnd },
+    },
+    countdownTarget: nextClose,
+    markerPercent: locked ? 42 + settlementProgress * 16 : 4 + tradingProgress * 36,
+  };
+}
+
+export function isSettlementLocked(now: Date = new Date()): boolean {
+  return getTradingSessionState(now).locked;
 }
 
 export function shouldRefreshPrices(lastPriceRefresh: string | null): boolean {

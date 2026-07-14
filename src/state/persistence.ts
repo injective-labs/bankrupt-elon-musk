@@ -4,7 +4,7 @@ import { productById } from "@/data/expandedAssets";
 import { isInvestmentProduct, categories, getSubcategoriesForCategory, ALL_SUBCATEGORY } from "@/data/categories";
 import { clampLeverage, getSpent } from "@/game/engine";
 
-const SORT_MODES: SortMode[] = ["featured", "price-asc", "price-desc", "owned"];
+const SORT_MODES: SortMode[] = ["price-asc", "price-desc", "owned"];
 
 export function createInitialState(): GameState {
   return {
@@ -23,7 +23,7 @@ export function createInitialState(): GameState {
     selectedCategory: "全部",
     selectedSubcategory: ALL_SUBCATEGORY,
     search: "",
-    sort: "featured",
+    sort: "price-asc",
     sound: true,
   };
 }
@@ -97,7 +97,7 @@ export function loadState(): GameState {
       )
         ? saved.selectedSubcategory
         : ALL_SUBCATEGORY;
-      state.sort = SORT_MODES.includes(saved.sort) ? saved.sort : "featured";
+      state.sort = SORT_MODES.includes(saved.sort) ? saved.sort : "price-asc";
     }
   } catch {
     state.inventory = {};

@@ -10,14 +10,12 @@ import {
   type ReactNode,
 } from "react";
 import { useInjPass } from "@/wallet/InjPassProvider";
+import { getOrCreateAnonWallet } from "@/wallet/anonWallet";
 import { useGame } from "./GameProvider";
 import {
-  requestNonce,
-  verifySignature,
   getCloudState,
   putCloudState,
   getLeaderboard,
-  toHexSignature,
   type SaveMetrics,
 } from "@/client/gameApi";
 import { getNetWorth, getPnl, getHoldingsValue } from "@/game/engine";
@@ -36,8 +34,8 @@ function computeMetrics(state: GameState): SaveMetrics {
 interface CloudSyncContextValue {
   status: CloudStatus;
   leaderboard: LeaderboardSnapshot | null;
-  /** Manually (re-)run login + load — useful if the signature popup was blocked. */
-  syncNow: () => void;
+  /** The wallet address currently used as the DB key (anon or INJ Pass). */
+  walletAddress: string;
 }
 
 const CloudSyncContext = createContext<CloudSyncContextValue | null>(null);
@@ -49,80 +47,75 @@ export function useCloudSync(): CloudSyncContextValue {
 }
 
 export function CloudSyncProvider({ children }: { children: ReactNode }) {
-  const { wallet, status: walletStatus, signMessage } = useInjPass();
+  const { wallet } = useInjPass();
   const { state, actions } = useGame();
 
   const [status, setStatus] = useState<CloudStatus>("idle");
   const [leaderboard, setLeaderboard] = useState<LeaderboardSnapshot | null>(null);
-  const tokenRef = useRef<string | null>(null);
-  const loadedRef = useRef(false);
+  const [anon, setAnon] = useState("");
+
+  // Assign the anonymous device address after mount (client-only).
+  useEffect(() => {
+    setAnon(getOrCreateAnonWallet());
+  }, []);
+
+  // INJ Pass address (once linked) takes precedence over the anon device address.
+  const address = wallet?.address || anon;
+  const walletName = wallet?.walletName ?? null;
+
   const stateRef = useRef(state);
   stateRef.current = state;
+  const loadedForRef = useRef<string | null>(null);
 
-  const refreshLeaderboard = useCallback(async () => {
-    const snap = await getLeaderboard(tokenRef.current);
+  const refreshLeaderboard = useCallback(async (addr: string) => {
+    const snap = await getLeaderboard(addr);
     if (snap) setLeaderboard(snap);
   }, []);
 
-  const login = useCallback(async () => {
-    if (!wallet) return;
+  // Load the cloud record for the active address; create it (migrating current
+  // local progress) if the DB has none yet.
+  useEffect(() => {
+    if (!address) return;
+    let cancelled = false;
     setStatus("syncing");
-    try {
-      const { message } = await requestNonce(wallet.address);
-      const sig = await signMessage(message); // opens passkey popup
-      if (!sig) {
-        setStatus("error");
-        return;
+    (async () => {
+      try {
+        const cloud = await getCloudState(address);
+        if (cancelled) return;
+        if (cloud) {
+          actions.replaceState(cloud);
+        } else {
+          await putCloudState(
+            address,
+            stateRef.current,
+            computeMetrics(stateRef.current),
+            walletName,
+          );
+        }
+        loadedForRef.current = address;
+        setStatus("synced");
+        void refreshLeaderboard(address);
+      } catch {
+        if (!cancelled) setStatus("error");
       }
-      const token = await verifySignature(wallet.address, toHexSignature(sig));
-      if (!token) {
-        setStatus("error");
-        return;
-      }
-      tokenRef.current = token;
-      const cloud = await getCloudState(token);
-      if (cloud) {
-        actions.replaceState(cloud);
-      } else {
-        const s = stateRef.current;
-        await putCloudState(token, s, computeMetrics(s), wallet.walletName);
-      }
-      loadedRef.current = true;
-      setStatus("synced");
-      void refreshLeaderboard();
-    } catch {
-      setStatus("error");
-    }
-  }, [wallet, signMessage, actions, refreshLeaderboard]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, walletName, actions, refreshLeaderboard]);
 
-  // Auto-attempt sign-in once per connected address.
-  const attemptedFor = useRef<string | null>(null);
+  // Debounced save on every state change, once the active address has loaded.
   useEffect(() => {
-    if (walletStatus !== "connected" || !wallet) {
-      tokenRef.current = null;
-      loadedRef.current = false;
-      attemptedFor.current = null;
-      setStatus("idle");
-      return;
-    }
-    if (attemptedFor.current === wallet.address) return;
-    attemptedFor.current = wallet.address;
-    void login();
-  }, [walletStatus, wallet, login]);
-
-  // Debounced cloud save on state change (only once logged in + initial load done).
-  useEffect(() => {
-    if (!tokenRef.current || !loadedRef.current) return;
+    if (!address || loadedForRef.current !== address) return;
     const id = setTimeout(async () => {
-      if (!tokenRef.current) return;
-      const ok = await putCloudState(tokenRef.current, state, computeMetrics(state), wallet?.walletName);
-      if (ok) void refreshLeaderboard();
-    }, 1500);
+      const ok = await putCloudState(address, state, computeMetrics(state), walletName);
+      if (ok) void refreshLeaderboard(address);
+    }, 1200);
     return () => clearTimeout(id);
-  }, [state, wallet, refreshLeaderboard]);
+  }, [state, address, walletName, refreshLeaderboard]);
 
   return (
-    <CloudSyncContext.Provider value={{ status, leaderboard, syncNow: () => void login() }}>
+    <CloudSyncContext.Provider value={{ status, leaderboard, walletAddress: address }}>
       {children}
     </CloudSyncContext.Provider>
   );

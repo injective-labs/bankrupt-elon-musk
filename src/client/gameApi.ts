@@ -40,33 +40,32 @@ export async function verifySignature(
   return data.token ?? null;
 }
 
-export async function getCloudState(token: string): Promise<GameState | null> {
-  const res = await fetch("/api/state", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+// Persistence is keyed purely by wallet address (anonymous device address, or the
+// INJ Pass address once linked) — no signature/token step required.
+export async function getCloudState(wallet: string): Promise<GameState | null> {
+  const res = await fetch(`/api/state?wallet=${encodeURIComponent(wallet)}`);
   if (!res.ok) return null;
   const data = (await res.json()) as { state?: GameState | null };
   return data.state ?? null;
 }
 
 export async function putCloudState(
-  token: string,
+  wallet: string,
   state: GameState,
   metrics: SaveMetrics,
   walletName?: string | null,
 ): Promise<boolean> {
   const res = await fetch("/api/state", {
     method: "PUT",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ state, metrics, walletName }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ walletAddress: wallet, state, metrics, walletName }),
   });
   return res.ok;
 }
 
-export async function getLeaderboard(token?: string | null): Promise<LeaderboardSnapshot | null> {
-  const res = await fetch("/api/leaderboard", {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+export async function getLeaderboard(wallet?: string | null): Promise<LeaderboardSnapshot | null> {
+  const qs = wallet ? `?wallet=${encodeURIComponent(wallet)}` : "";
+  const res = await fetch(`/api/leaderboard${qs}`);
   if (!res.ok) return null;
   return res.json();
 }

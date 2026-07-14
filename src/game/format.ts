@@ -26,3 +26,8 @@ export function formatFxRate(currency: string, rate: number): string {
   if (rate < 0.1) return `$${rate.toFixed(4)}`;
   return `$${rate.toFixed(3)}`;
 }
+
+export function formatAddress(address: string): string {
+  if (!address || address.length <= 8) return address || "";
+  return `${address.slice(0, 3)}...${address.slice(-4)}`;
+}

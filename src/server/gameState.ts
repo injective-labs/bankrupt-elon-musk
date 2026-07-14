@@ -14,7 +14,7 @@ export interface SavePayload {
   walletName?: string | null;
 }
 
-const SORT_MODES: SortMode[] = ["featured", "price-asc", "price-desc", "owned"];
+const SORT_MODES: SortMode[] = ["price-asc", "price-desc", "owned"];
 
 /** Recompose the client GameState from the normalized tables. */
 export async function loadState(wallet: string): Promise<GameState | null> {
@@ -52,7 +52,7 @@ export async function loadState(wallet: string): Promise<GameState | null> {
     selectedCategory: "全部",
     selectedSubcategory: "全部",
     search: "",
-    sort: (SORT_MODES.includes(player.sort as SortMode) ? player.sort : "featured") as SortMode,
+    sort: (SORT_MODES.includes(player.sort as SortMode) ? player.sort : "price-asc") as SortMode,
     sound: player.sound,
   };
 }
@@ -96,7 +96,7 @@ export async function saveState(wallet: string, payload: SavePayload): Promise<v
     holdingsValue: Number(metrics.holdingsValue) || 0,
     locale: state.locale === "en" ? "en" : "zh",
     sound: Boolean(state.sound),
-    sort: SORT_MODES.includes(state.sort) ? state.sort : "featured",
+    sort: SORT_MODES.includes(state.sort) ? state.sort : "price-asc",
   };
 
   await prisma.$transaction([

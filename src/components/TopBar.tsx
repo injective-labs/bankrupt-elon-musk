@@ -5,10 +5,12 @@ import { useGame } from "@/state/GameProvider";
 import { t } from "@/i18n";
 import {
   getNextMarketClose,
+  getTradingSessionState,
   formatRefreshDuration,
   formatMarketCloseTime,
 } from "@/game/marketClock";
 import { ConnectButton } from "@/wallet/ConnectButton";
+import { ResetDialog } from "./ResetDialog";
 
 function MarketClock() {
   const { state } = useGame();
@@ -20,10 +22,15 @@ function MarketClock() {
   }, []);
 
   const nextClose = getNextMarketClose(now);
+  const locked = getTradingSessionState(now).locked;
   return (
     <div className="market-clock" aria-live="polite">
       <span>{t(state.locale, "nextRefresh")}</span>
-      <strong>{formatRefreshDuration(nextClose.getTime() - now.getTime(), state.locale)}</strong>
+      <strong>
+        {locked
+          ? t(state.locale, "clearingNow")
+          : formatRefreshDuration(nextClose.getTime() - now.getTime(), state.locale)}
+      </strong>
       <span>
         {t(state.locale, "marketCloseAnchor")} · {formatMarketCloseTime(nextClose, state.locale)} HKT
       </span>
@@ -32,17 +39,16 @@ function MarketClock() {
 }
 
 export function TopBar() {
-  const { state, actions, resetArmed } = useGame();
+  const { state, actions } = useGame();
   const locale = state.locale;
+  const [resetOpen, setResetOpen] = useState(false);
 
   return (
     <header className="topbar">
       <div className="brand-lockup">
         <div className="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 64 64" role="img">
-            <rect x="8" y="8" width="48" height="48" rx="8"></rect>
-            <path d="M20 42L31 18l13 24M25 34h14"></path>
-          </svg>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/musk-money-logo.png" alt="" width={60} height={60} decoding="async" />
         </div>
         <div>
           <h1>{t(locale, "brandTitle")}</h1>
@@ -51,6 +57,15 @@ export function TopBar() {
       </div>
 
       <div className="topbar-actions" aria-label={t(locale, "gameControls")}>
+        <button
+          className="icon-button danger"
+          type="button"
+          title={t(locale, "reset")}
+          onClick={() => setResetOpen(true)}
+        >
+          <span aria-hidden="true">↺</span>
+          <span>{t(locale, "reset")}</span>
+        </button>
         <button
           className="icon-button"
           id="languageButton"
@@ -64,33 +79,25 @@ export function TopBar() {
         <button
           className="icon-button"
           type="button"
-          title={t(locale, "randomInvest")}
-          onClick={actions.randomSpend}
-        >
-          <span aria-hidden="true">🎲</span>
-          <span>{t(locale, "randomInvest")}</span>
-        </button>
-        <button
-          className="icon-button"
-          type="button"
           title={state.sound ? t(locale, "soundOn") : t(locale, "soundOff")}
           onClick={actions.toggleSound}
         >
           <span aria-hidden="true">{state.sound ? "🔊" : "🔇"}</span>
           <span>{state.sound ? t(locale, "soundOn") : t(locale, "soundOff")}</span>
         </button>
-        <button
-          className={`icon-button danger${resetArmed ? " armed" : ""}`}
-          type="button"
-          title={t(locale, "reset")}
-          onClick={actions.reset}
-        >
-          <span aria-hidden="true">↺</span>
-          <span>{resetArmed ? t(locale, "confirmReset") : t(locale, "reset")}</span>
-        </button>
         <ConnectButton />
         <MarketClock />
       </div>
+
+      <ResetDialog
+        open={resetOpen}
+        locale={locale}
+        onCancel={() => setResetOpen(false)}
+        onConfirm={() => {
+          actions.reset();
+          setResetOpen(false);
+        }}
+      />
     </header>
   );
 }

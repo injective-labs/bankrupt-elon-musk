@@ -16,7 +16,6 @@ import {
   COMMODITY_ASSETS,
 } from "./marketGroups";
 import { CATEGORY_LABELS, SUBCATEGORY_LABELS } from "./categoryLabels";
-import { ASSET_NAMES } from "./assetNames";
 
 // English equivalents for the (Chinese) asset-class / subcategory names, so the
 // English fallbacks for generated assets never leak Chinese.
@@ -293,24 +292,50 @@ const expandedMarketAssets: Product[] = [
   ),
 ];
 
-// Enrich generated assets with real names fetched from Yahoo (keyed by final ticker).
-// Falls back silently to the "TICKER · <class>" English name when absent.
-expandedMarketAssets.forEach((asset) => {
-  const real = asset.ticker ? ASSET_NAMES[asset.ticker] : undefined;
-  if (real?.en) asset.nameEn = real.en;
-  if (real?.zh) asset.name = real.zh;
-});
+// English/Chinese names come purely from the curated MARKET_NAME_OVERRIDES (clean,
+// prototype-aligned) plus ticker fallbacks — we intentionally do NOT enrich from the
+// verbose Yahoo ASSET_NAMES list, which produced names like
+// "The Hong Kong and China Gas Company Limited" instead of "HK & China Gas".
 
-// Merge: start from the base catalog, append unique expanded assets.
-export const products: Product[] = [...baseProducts];
-const existingAssetKeys = new Set(products.map(getAssetDedupeKey));
+// --- Prototype asset-universe trim (keeps only the curated ~160 assets) ---
+// Whole classes dropped; crypto & US stocks narrowed to a core set; HK/KR/TW/JP
+// + metals/commodities kept in full. Mirrors the prototype's shouldKeepProduct.
+const REMOVED_ASSET_CLASSES = new Set(["A股", "欧股", "ETF", "债券", "私募"]);
+const CORE_CRYPTO_TICKERS = new Set([
+  "BTC", "ETH", "DOGE", "LTC", "SOL", "XRP", "BNB", "ADA", "LINK", "AVAX", "DOT", "INJ",
+]);
+const CORE_US_STOCK_TICKERS = new Set([
+  "NVDA", "AMD", "AVGO", "TSM", "ASML", "MU", "SNDK", "ARM", "MRVL", "SMCI", "VRT", "DELL",
+  "ANET", "ALAB", "CRWV", "ORCL", "MSFT", "GOOGL", "AMZN", "META", "PLTR", "MSTR", "COIN",
+  "NET", "INTC", "QCOM", "TXN", "AMAT", "LRCX", "KLAC", "ADI", "MCHP", "ON", "MPWR", "NXPI",
+  "TER", "LSCC", "COHR",
+]);
+
+function isInvestmentProduct(product: Product): boolean {
+  return product.category === "金融" || product.investment === true;
+}
+
+function shouldKeepProduct(product: Product): boolean {
+  if (!isInvestmentProduct(product)) return true;
+  const assetClass = inferAssetClass(product);
+  if (REMOVED_ASSET_CLASSES.has(assetClass)) return false;
+  if (assetClass === "加密货币") return CORE_CRYPTO_TICKERS.has(product.ticker ?? "");
+  if (assetClass === "美股") return CORE_US_STOCK_TICKERS.has(product.ticker ?? "");
+  return true;
+}
+
+// Merge base catalog + unique expanded assets, then trim to the prototype set.
+const mergedProducts: Product[] = [...baseProducts];
+const existingAssetKeys = new Set(mergedProducts.map(getAssetDedupeKey));
 expandedMarketAssets.forEach((asset) => {
   const key = getAssetDedupeKey(asset);
   if (!existingAssetKeys.has(key)) {
-    products.push(asset);
+    mergedProducts.push(asset);
     existingAssetKeys.add(key);
   }
 });
+
+export const products: Product[] = mergedProducts.filter(shouldKeepProduct);
 
 export const productById = new Map<string, Product>(
   products.map((product) => [product.id, product]),

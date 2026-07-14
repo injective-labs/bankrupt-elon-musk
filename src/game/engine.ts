@@ -299,6 +299,66 @@ export function buyMax(state: GameState, productId: string, effects: Effects): v
   buyProduct(state, productId, maxQuantity, effects);
 }
 
+// --- Trade-ticket quantity helpers (ported from the prototype) ---
+
+export type TradeSide = "buy" | "sell";
+
+export function getMaxBuyQuantity(state: GameState, product: Product): number {
+  const price = getProductPrice(state, product);
+  if (price <= 0) return 0;
+  return Math.max(0, Math.floor((Math.max(0, state.cash) * state.leverage) / price));
+}
+
+export function getMaxTradeQuantity(state: GameState, product: Product, side: TradeSide): number {
+  if (side === "buy") return getMaxBuyQuantity(state, product);
+  return Math.max(0, Math.floor(getPositionQuantity(state.inventory[product.id])));
+}
+
+export function clampTradeQuantity(
+  state: GameState,
+  product: Product,
+  side: TradeSide,
+  quantity: number | string,
+): number {
+  const maxQuantity = getMaxTradeQuantity(state, product, side);
+  const safe = Math.floor(Number(quantity) || 0);
+  if (maxQuantity <= 0 || safe <= 0) return 0;
+  return Math.min(maxQuantity, safe);
+}
+
+export function getFractionTradeQuantity(
+  state: GameState,
+  product: Product,
+  side: TradeSide,
+  fraction: number,
+): number {
+  const maxQuantity = getMaxTradeQuantity(state, product, side);
+  if (maxQuantity <= 0) return 0;
+  return Math.max(1, Math.floor(maxQuantity * fraction));
+}
+
+export function getTradeEstimateText(
+  state: GameState,
+  product: Product,
+  side: TradeSide,
+  quantity: number | string,
+): string {
+  const locale = state.locale;
+  const safe = clampTradeQuantity(state, product, side, quantity);
+  if (safe <= 0) {
+    return side === "buy" ? t(locale, "insufficientMargin") : t(locale, "noPosition");
+  }
+  const price = getProductPrice(state, product);
+  if (side === "buy") {
+    const notional = price * safe;
+    const margin = notional / state.leverage;
+    return `${t(locale, "estimatedNotional")} ${formatCurrency(notional, notional >= 1_000_000_000)} · ${t(locale, "estimatedMargin")} ${formatCurrency(margin, margin >= 1_000_000_000)}`;
+  }
+  const proceeds = price * safe;
+  const remaining = getMaxTradeQuantity(state, product, side) - safe;
+  return `${t(locale, "estimatedProceeds")} ${formatCurrency(proceeds, proceeds >= 1_000_000_000)} · ${t(locale, "remainingAfterSell")} ${formatNumber(remaining, locale)}`;
+}
+
 export function sellProduct(
   state: GameState,
   productId: string,
@@ -361,39 +421,6 @@ export function sellAllProduct(state: GameState, productId: string, effects: Eff
     return;
   }
   sellProduct(state, productId, quantity, effects);
-}
-
-export function randomSpend(state: GameState, effects: Effects): void {
-  const investable = getInvestmentProducts().filter((product) => getProductPrice(state, product) > 0);
-  let transactions = 0;
-  let total = 0;
-
-  for (let i = 0; i < 10; i += 1) {
-    const affordable = investable.filter(
-      (product) => getProductPrice(state, product) / state.leverage <= state.cash,
-    );
-    if (!affordable.length) break;
-    const product = affordable[Math.floor(Math.random() * affordable.length)];
-    const price = getProductPrice(state, product);
-    const targetMargin = state.cash * (0.035 + Math.random() * 0.08);
-    const quantity = Math.max(1, Math.floor((targetMargin * state.leverage) / price));
-    if (buyProduct(state, product.id, quantity, effects, { silent: true })) {
-      total += price * quantity;
-      transactions += 1;
-    }
-  }
-
-  if (!transactions) {
-    effects.sounds.push("error");
-    return;
-  }
-  addLog(
-    state,
-    t(state.locale, "randomInvest"),
-    `${transactions} ${state.locale === "en" ? "trades" : "笔交易"} · ${formatCurrency(total, total >= 1_000_000_000)}`,
-  );
-  effects.sounds.push("chaos");
-  effects.flash = true;
 }
 
 export function borrowMoney(state: GameState, requestedAmount: number | null, effects: Effects): void {

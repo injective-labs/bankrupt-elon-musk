@@ -2,7 +2,7 @@
 
 export type Locale = "zh" | "en";
 
-export type SortMode = "featured" | "price-asc" | "price-desc" | "owned";
+export type SortMode = "price-asc" | "price-desc" | "owned";
 
 export type SoundKind = "buy" | "largeBuy" | "refund" | "error" | "chaos" | "reset";
 

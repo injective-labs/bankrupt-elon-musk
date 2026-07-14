@@ -1,0 +1,25 @@
+# Local Postgres for the bankrupt-elon-musk game backend.
+# Matches DATABASE_URL in .env: postgresql://postgres:postgres@localhost:5433/bankrupt_elon
+# Start:   docker compose up -d
+# Migrate: pnpm prisma migrate deploy
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: bankrupt-elon-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: bankrupt_elon
+    ports:
+      - "5433:5432"
+    volumes:
+      - bankrupt-elon-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bankrupt_elon"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  bankrupt-elon-pgdata:

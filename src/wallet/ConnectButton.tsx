@@ -29,7 +29,7 @@ const LABELS = {
 export function ConnectButton() {
   const { status, wallet, error, connect, disconnect, signMessage } = useInjPass();
   const { state } = useGame();
-  const { status: cloudStatus, syncNow } = useCloudSync();
+  const { status: cloudStatus } = useCloudSync();
   const locale = state.locale;
 
   const cloudLabelKey =
@@ -62,14 +62,9 @@ export function ConnectButton() {
         </button>
         {open && (
           <div className="wallet-menu" role="menu">
-            <button
-              type="button"
-              role="menuitem"
-              disabled={cloudStatus === "syncing"}
-              onClick={() => syncNow()}
-            >
+            <div className="wallet-status" role="status">
               {LABELS[cloudLabelKey][locale]}
-            </button>
+            </div>
             <button
               type="button"
               role="menuitem"
