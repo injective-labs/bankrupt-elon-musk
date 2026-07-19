@@ -124,15 +124,15 @@ export interface LogEntry {
 export interface LeaderboardRow {
   address: string;
   walletName?: string | null;
-  pnl: number;
-  netWorth: number;
+  pnl: DecimalString;
+  netWorth: DecimalString;
   liquidated: boolean;
 }
 
 export interface LeaderboardSnapshot {
   top: LeaderboardRow[];
   total: number;
-  you?: { rank: number; total: number; pnl: number } | null;
+  you?: { rank: number; total: number; pnl: DecimalString } | null;
 }
 
 export interface GameState {

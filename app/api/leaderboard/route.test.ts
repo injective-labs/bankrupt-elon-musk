@@ -1,17 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({ getLossLeaderboard: vi.fn(), verifyToken: vi.fn() }));
+vi.mock("@/server/leaderboard", () => ({ getLossLeaderboard: mocks.getLossLeaderboard }));
+vi.mock("@/server/auth", () => ({ verifyToken: mocks.verifyToken }));
 
 import { GET } from "./route";
 
 describe("GET /api/leaderboard", () => {
-  it("reports the leaderboard as unavailable instead of fabricating ranks", async () => {
-    const response = await GET();
+  beforeEach(() => vi.clearAllMocks());
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "LEADERBOARD_UNAVAILABLE",
-        message: "Leaderboard is unavailable while authoritative ranking is being upgraded.",
-      },
-    });
+  it("serves a masked public leaderboard without accepting a wallet query parameter", async () => {
+    mocks.getLossLeaderboard.mockResolvedValueOnce({ top: [], total: 0, you: null });
+    const response = await GET(new Request("http://localhost/api/leaderboard?wallet=0xattacker"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getLossLeaderboard).toHaveBeenCalledWith(null, 10);
+  });
+
+  it("includes caller rank only when the session cookie verifies", async () => {
+    mocks.verifyToken.mockResolvedValueOnce("0xcaller");
+    mocks.getLossLeaderboard.mockResolvedValueOnce({ top: [], total: 20, you: { rank: 12, total: 20, pnl: "-1" } });
+    await GET(new Request("http://localhost/api/leaderboard", { headers: { cookie: "musk_session=token" } }));
+    expect(mocks.verifyToken).toHaveBeenCalledWith("token");
+    expect(mocks.getLossLeaderboard).toHaveBeenCalledWith("0xcaller", 10);
   });
 });

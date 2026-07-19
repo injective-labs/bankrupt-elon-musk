@@ -35,26 +35,27 @@ export function PortfolioPanel() {
 
   // Real leaderboard rank when connected; otherwise the simulated ranking.
   const you = leaderboard?.you;
+  const leaderboardPnl = you ? Number(you.pnl) : 0;
   const status = you
     ? {
         title: t(locale, "lossRankTitle"),
         text:
           locale === "en"
             ? `#${formatNumber(you.rank, locale)} / ${formatNumber(you.total, locale)} real players. ${
-                you.pnl < 0
-                  ? `Loss ${formatCurrency(Math.abs(you.pnl), true)}`
-                  : you.pnl > 0
-                    ? `Profit ${formatCurrency(you.pnl, true)}`
+                leaderboardPnl < 0
+                  ? `Loss ${formatCurrency(Math.abs(leaderboardPnl), true)}`
+                  : leaderboardPnl > 0
+                    ? `Profit ${formatCurrency(leaderboardPnl, true)}`
                     : "Flat book"
               }.`
             : `#${formatNumber(you.rank, locale)} / ${formatNumber(you.total, locale)} 真实玩家。${
-                you.pnl < 0
-                  ? `亏损 ${formatCurrency(Math.abs(you.pnl), true)}`
-                  : you.pnl > 0
-                    ? `盈利 ${formatCurrency(you.pnl, true)}`
+                leaderboardPnl < 0
+                  ? `亏损 ${formatCurrency(Math.abs(leaderboardPnl), true)}`
+                  : leaderboardPnl > 0
+                    ? `盈利 ${formatCurrency(leaderboardPnl, true)}`
                     : "账户打平"
               }。`,
-        color: you.pnl < 0 ? "#c94d3f" : you.pnl > 0 ? "#2d7b46" : "#b88921",
+        color: leaderboardPnl < 0 ? "#c94d3f" : leaderboardPnl > 0 ? "#2d7b46" : "#b88921",
       }
     : getLossRanking(state);
 

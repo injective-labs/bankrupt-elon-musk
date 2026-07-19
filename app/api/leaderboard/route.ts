@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
+import { verifyToken } from "@/server/auth";
+import { getLossLeaderboard } from "@/server/leaderboard";
+import { readSessionCookie } from "@/server/http/sessionCookie";
+import { toErrorResponse } from "@/server/http/errors";
 
 export const runtime = "nodejs";
 
-// Task 5 will replace this explicit unavailable response with authoritative,
-// quote-based loss rankings. Do not synthesize financial results in the interim.
-export async function GET() {
-  return NextResponse.json(
-    {
-      error: {
-        code: "LEADERBOARD_UNAVAILABLE",
-        message: "Leaderboard is unavailable while authoritative ranking is being upgraded.",
-      },
-    },
-    { status: 503 },
-  );
+export async function GET(request: Request) {
+  try {
+    const token = readSessionCookie(request);
+    const walletAddress = token ? await verifyToken(token) : null;
+    return NextResponse.json(await getLossLeaderboard(walletAddress, 10));
+  } catch (error) {
+    return toErrorResponse(error);
+  }
 }
