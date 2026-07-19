@@ -2,13 +2,20 @@ import { randomBytes } from "node:crypto";
 import { isAddress, verifyMessage, getAddress, type Hex } from "viem";
 import { SignJWT, jwtVerify } from "jose";
 import { prisma } from "./db";
+import { ApiError } from "./http/errors";
+import { readSessionCookie } from "./http/sessionCookie";
 
 const NONCE_TTL_MS = 5 * 60 * 1000;
 const TOKEN_TTL = "7d";
 
-const secret = new TextEncoder().encode(
-  process.env.JWT_SECRET || "dev-insecure-secret-change-me",
-);
+function jwtSecret(): Uint8Array {
+  const value = process.env.JWT_SECRET;
+  if (value) return new TextEncoder().encode(value);
+  if (process.env.NODE_ENV !== "test" && process.env.NODE_ENV !== "development") {
+    throw new Error("JWT_SECRET is required outside test and development");
+  }
+  return new TextEncoder().encode("dev-insecure-secret-change-me");
+}
 
 export function isValidAddress(address: unknown): address is string {
   return typeof address === "string" && isAddress(address);
@@ -61,15 +68,25 @@ export async function verifyAndIssueToken(
     .setSubject(wallet)
     .setIssuedAt()
     .setExpirationTime(TOKEN_TTL)
-    .sign(secret);
+    .sign(jwtSecret());
 }
 
 /** Verify a session JWT and return the wallet address (checksum) or null. */
 export async function verifyToken(token: string): Promise<string | null> {
   try {
-    const { payload } = await jwtVerify(token, secret);
-    return typeof payload.sub === "string" ? payload.sub : null;
+    const { payload } = await jwtVerify(token, jwtSecret());
+    return typeof payload.sub === "string" && isAddress(payload.sub)
+      ? getAddress(payload.sub)
+      : null;
   } catch {
     return null;
   }
+}
+
+export async function authenticateRequest(request: Request): Promise<string> {
+  const token = readSessionCookie(request);
+  if (!token) throw new ApiError(401, "UNAUTHORIZED", "Authentication required");
+  const wallet = await verifyToken(token);
+  if (!wallet) throw new ApiError(401, "UNAUTHORIZED", "Invalid or expired session");
+  return wallet;
 }

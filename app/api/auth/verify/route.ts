@@ -1,21 +1,34 @@
 import { NextResponse } from "next/server";
 import { verifyAndIssueToken, isValidAddress } from "@/server/auth";
+import { loginPlayer } from "@/server/account";
+import { ApiError, toErrorResponse } from "@/server/http/errors";
+import { setSessionCookie } from "@/server/http/sessionCookie";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  let body: { address?: string; signature?: string };
+  let body: { address?: string; signature?: string; walletName?: string | null };
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return toErrorResponse(new ApiError(400, "INVALID_JSON", "Invalid JSON"));
   }
   if (!isValidAddress(body.address) || typeof body.signature !== "string") {
-    return NextResponse.json({ error: "Invalid address or signature" }, { status: 400 });
+    return toErrorResponse(new ApiError(400, "INVALID_REQUEST", "Invalid address or signature"));
   }
-  const token = await verifyAndIssueToken(body.address, body.signature);
-  if (!token) {
-    return NextResponse.json({ error: "Signature verification failed" }, { status: 401 });
+  try {
+    const token = await verifyAndIssueToken(body.address, body.signature);
+    if (!token) {
+      throw new ApiError(401, "INVALID_SIGNATURE", "Signature verification failed");
+    }
+    const player = await loginPlayer(body.address, body.walletName);
+    const response = NextResponse.json({
+      walletAddress: player.walletAddress,
+      walletName: player.walletName,
+    });
+    setSessionCookie(response, token);
+    return response;
+  } catch (error) {
+    return toErrorResponse(error);
   }
-  return NextResponse.json({ token });
 }
