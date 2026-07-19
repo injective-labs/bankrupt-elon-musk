@@ -1,5 +1,5 @@
 import { getInvestmentProducts, getProductCategory } from "./categories";
-import { getQuoteSymbol } from "../game/pricing";
+import { getQuoteSymbol } from "./quoteSymbols";
 import type { Product } from "../types";
 
 export interface AssetSeedRow {

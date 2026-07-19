@@ -1,37 +1,10 @@
 // Ported verbatim from the original script.js (game constants + FX tables).
-import type { FxRates } from "@/types";
-
-export const STARTING_BALANCE = 50_000_000_000;
-export const STORAGE_KEY = "spend-musk-money-state-v2";
-export const WARNING_LTV = 0.5;
-export const LIQUIDATION_LTV = 0.99;
-export const BASE_BORROW_APR = 0.065;
-export const RISK_APR_SPREAD = 0.24;
-export const LEVERAGE_APR_SPREAD = 0.0012;
-export const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
-export const PRICE_REFRESH_CHECK_INTERVAL_MS = 60 * 1000;
 export const SETTLEMENT_WINDOW_MS = 30 * 60 * 1000;
-export const TRADE_FRACTIONS = [1 / 4, 1 / 8, 1 / 16, 1 / 32];
 export const HONG_KONG_TZ = "Asia/Hong_Kong";
 // The game uses a fictional daily close at HKT 17:30 (17:00-18:00 is the
 // clearing/settlement window), matching the prototype.
 export const MARKET_CLOSE_HOUR_HKT = 17;
 export const MARKET_CLOSE_MINUTE_HKT = 30;
-export const SERVER_PLAYER_COUNT = 10_000_000;
-export const FALLBACK_FX: FxRates = {
-  USD: 1,
-  HKD: 0.128,
-  CNY: 0.138,
-  KRW: 0.00072,
-  TWD: 0.031,
-  JPY: 0.0064,
-  EUR: 1.08,
-  DKK: 0.145,
-  CHF: 1.1,
-  GBP: 1.27,
-  GBp: 0.0127,
-};
-
 export const FX_SYMBOLS: Record<string, string> = {
   HKD: "HKDUSD=X",
   CNY: "CNYUSD=X",

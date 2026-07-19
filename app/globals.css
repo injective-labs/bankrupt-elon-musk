@@ -134,8 +134,7 @@ button:disabled {
 .max-button,
 .sell-button,
 .sell-all-button,
-.refund-button,
-.deal-tape-heading button {
+.refund-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -255,8 +254,7 @@ button:disabled {
 .max-button:hover,
 .sell-button:hover,
 .sell-all-button:hover,
-.refund-button:hover,
-.deal-tape-heading button:hover {
+.refund-button:hover {
   transform: translateY(-1px);
   border-color: var(--ink);
   box-shadow: 0 8px 18px rgba(23, 33, 29, 0.1);
@@ -784,49 +782,6 @@ button:disabled {
   opacity: 0.46;
 }
 
-.finance-panel {
-  display: flex;
-  flex-direction: column;
-}
-
-.finance-panel[hidden] {
-  display: none;
-}
-
-.bankruptcy-alert {
-  display: grid;
-  gap: 4px;
-  margin: 14px 14px 0;
-  padding: 12px;
-  border: 1px solid rgba(201, 77, 63, 0.38);
-  border-radius: 8px;
-  background: rgba(201, 77, 63, 0.09);
-  color: var(--coral);
-}
-
-.bankruptcy-alert strong {
-  font-size: 0.95rem;
-}
-
-.bankruptcy-alert span {
-  color: var(--ink);
-  font-size: 0.84rem;
-  line-height: 1.4;
-}
-
-.bankruptcy-alert[hidden] {
-  display: none;
-}
-
-.finance-panel.bankrupt .metric.primary {
-  background: var(--coral);
-}
-
-.finance-panel.bankrupt .status-card {
-  border-color: rgba(201, 77, 63, 0.38);
-  background: rgba(201, 77, 63, 0.06);
-}
-
 .money-stack {
   padding: 14px;
   border-bottom: 1px solid var(--line);
@@ -1050,223 +1005,9 @@ button:disabled {
   line-height: 1.45;
 }
 
-.insight-list {
-  padding: 0 14px 14px;
-  border-bottom: 1px solid var(--line);
-}
-
-.insight-list h3,
-.deal-tape h3,
-.bank-panel h3 {
-  margin: 0 0 10px;
-  font-size: 0.9rem;
-}
-
-.afford-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 36px;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 0.84rem;
-}
-
-.afford-row:first-child {
-  border-top: 0;
-}
-
-.afford-row strong {
-  color: var(--ink);
-  white-space: nowrap;
-}
-
-.bank-panel {
-  padding: 14px;
-  border-bottom: 1px solid var(--line);
-}
-
-.bank-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.bank-heading span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-soft);
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 820;
-}
-
-.leverage-control,
-.loan-input {
-  display: grid;
-  gap: 7px;
-  margin-top: 10px;
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 760;
-}
-
-.leverage-control {
-  grid-template-columns: 1fr auto;
-}
-
-.leverage-control input {
-  grid-column: 1 / -1;
-  width: 100%;
-  accent-color: var(--teal);
-}
-
-.leverage-control strong {
-  color: var(--ink);
-}
-
-.leverage-presets,
-.bank-actions {
-  display: grid;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.leverage-presets {
-  grid-template-columns: repeat(5, 1fr);
-}
-
-.bank-actions {
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.leverage-presets button,
-.bank-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 32px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--ink);
-  font-weight: 800;
-}
-
-.leverage-presets button.active {
-  border-color: rgba(8, 124, 117, 0.42);
-  background: var(--teal);
-  color: #fff;
-}
-
-.loan-input input {
-  min-height: 36px;
-  width: 100%;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  padding: 0 10px;
-  color: var(--ink);
-}
-
-.bank-note {
-  margin: 9px 0 0;
-  color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.42;
-}
-
-.deal-tape {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  padding: 14px;
-}
-
-.deal-tape-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.deal-tape-heading button {
-  min-height: 30px;
-  padding: 0 10px;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.log-list {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 130px;
-  max-height: 240px;
-  overflow: auto;
-}
-
-.log-entry {
-  padding: 9px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-soft);
-  color: var(--muted);
-  font-size: 0.82rem;
-  line-height: 1.35;
-}
-
-.log-entry strong {
-  color: var(--ink);
-}
-
-.spark {
-  animation: spark 360ms ease;
-}
-
-@keyframes spark {
-  0% {
-    transform: scale(1);
-  }
-  45% {
-    transform: scale(1.025);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
 @media (max-width: 1180px) {
   .dashboard-grid {
     grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
-  }
-
-  .finance-panel {
-    grid-column: 1 / -1;
-    position: static;
-    max-height: none;
-  }
-
-  .finance-panel {
-    display: grid;
-    grid-template-columns: minmax(280px, 1fr) minmax(260px, 0.8fr);
-    align-items: start;
-  }
-
-  .finance-panel .panel-heading {
-    grid-column: 1 / -1;
-  }
-
-  .deal-tape {
-    border-left: 1px solid var(--line);
   }
 
   .product-grid {
@@ -1303,8 +1044,7 @@ button:disabled {
     text-align: left;
   }
 
-  .dashboard-grid,
-  .finance-panel {
+  .dashboard-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1331,13 +1071,6 @@ button:disabled {
     min-height: 360px;
   }
 
-  .finance-panel {
-    display: block;
-  }
-
-  .deal-tape {
-    border-left: 0;
-  }
 }
 
 @media (max-width: 520px) {

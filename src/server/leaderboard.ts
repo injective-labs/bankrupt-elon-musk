@@ -81,7 +81,6 @@ export async function getLossLeaderboard(
         walletName: row.walletName,
         pnl: row.pnl.toString(),
         netWorth: row.netWorth.toString(),
-        liquidated: false,
       }));
     const caller = walletAddress
       ? rows.find((row) => row.walletAddress.toLowerCase() === walletAddress.toLowerCase())

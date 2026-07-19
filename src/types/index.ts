@@ -102,32 +102,11 @@ export interface Position {
 }
 
 /** Legacy saved positions could be a bare number. */
-export type StoredPosition = Position | number;
-
-export interface PriceQuote {
-  nativePrice: number;
-  usdPrice: number;
-  currency: string;
-  closeDate: string;
-  source: string;
-  updatedAt: string;
-}
-
-export type FxRates = Record<string, number>;
-
-export interface LogEntry {
-  title: string;
-  detail: string;
-  /** Client monotonic timestamp; used by the backend for idempotent trade history. */
-  ts: number;
-}
-
 export interface LeaderboardRow {
   address: string;
   walletName?: string | null;
   pnl: DecimalString;
   netWorth: DecimalString;
-  liquidated: boolean;
 }
 
 export interface LeaderboardSnapshot {
@@ -137,18 +116,7 @@ export interface LeaderboardSnapshot {
 }
 
 export interface GameState {
-  inventory: Record<string, Position>;
-  cash: number;
-  debt: number;
-  accruedInterest: number;
-  lastInterestAccruedAt: number;
-  liquidated: boolean;
-  leverage: number;
-  prices: Record<string, PriceQuote>;
-  fxRates: FxRates;
-  lastPriceRefresh: string | null;
   locale: Locale;
-  log: LogEntry[];
   selectedCategory: string;
   selectedSubcategory: string;
   search: string;

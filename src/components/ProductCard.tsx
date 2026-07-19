@@ -15,7 +15,7 @@ import {
   getUnitLabel,
   getTradeEstimateText,
   type TradeSide,
-} from "@/game/engine";
+} from "@/game/productPresentation";
 import { floorDecimalDivision, formatDecimalCurrency, formatDecimalNumber, integerFraction, isPositiveDecimal } from "@/game/format";
 import { isQuoteFresh } from "@/game/quoteFreshness";
 
@@ -27,7 +27,6 @@ interface ProductCardProps {
   currency: string;
   live: boolean;
   selected: boolean;
-  liquidated: boolean;
   locale: Locale;
   activeSide: TradeSide | null;
   onOpenTicket: (id: string, side: TradeSide) => void;
@@ -113,7 +112,7 @@ function TradeTicket({
           );
         })}
       </div>
-      <p className="trade-estimate">{t(locale, "estimateOnly")}: {getTradeEstimateText(state, product, side, qty)}</p>
+      <p className="trade-estimate">{t(locale, "estimateOnly")}: {getTradeEstimateText(locale, Number(asset?.usdPrice ?? 0), side, qty, maxQuantity)}</p>
       {lastError && <p className="trade-error" role="alert">{errorText(locale, lastError)}</p>}
       <div className="trade-ticket-actions">
         <button
@@ -209,7 +208,6 @@ function ProductCardBase({
   currency,
   live,
   selected,
-  liquidated,
   locale,
   activeSide,
   onOpenTicket,
@@ -253,7 +251,7 @@ function ProductCardBase({
         <button
           className="buy-button"
           type="button"
-          disabled={liquidated || tradeDisabled}
+          disabled={tradeDisabled}
           onClick={() => onOpenTicket(product.id, "buy")}
         >
           {t(locale, "buy")}
@@ -261,7 +259,7 @@ function ProductCardBase({
         <button
           className="max-button"
           type="button"
-          disabled={liquidated || tradeDisabled}
+          disabled={tradeDisabled}
           onClick={() => { void actions.buyMax(product.id); }}
         >
           {t(locale, "allIn")}
@@ -269,7 +267,7 @@ function ProductCardBase({
         <button
           className="sell-button"
           type="button"
-          disabled={liquidated || tradeDisabled || !isPositiveDecimal(displayOwned)}
+          disabled={tradeDisabled || !isPositiveDecimal(displayOwned)}
           onClick={() => onOpenTicket(product.id, "sell")}
         >
           {t(locale, "sell")}
@@ -277,7 +275,7 @@ function ProductCardBase({
         <button
           className="sell-all-button"
           type="button"
-          disabled={liquidated || tradeDisabled || !isPositiveDecimal(displayOwned)}
+          disabled={tradeDisabled || !isPositiveDecimal(displayOwned)}
           onClick={() => { void actions.sellAll(product.id); }}
         >
           {t(locale, "sellAll")}

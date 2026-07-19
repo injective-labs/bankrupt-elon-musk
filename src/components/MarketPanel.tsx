@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useMemo, useState } from "react";
 import type { Product, SortMode } from "@/types";
-import type { TradeSide } from "@/game/engine";
+import type { TradeSide } from "@/game/productPresentation";
 import { useGame } from "@/state/GameProvider";
 import { productById } from "@/data/expandedAssets";
 import { t, labelFrom } from "@/i18n";
@@ -32,6 +32,6 @@ export function MarketPanel() {
     <div className="category-tabs" role="tablist" aria-label={t(locale, "assetCategories")}>{categories.map((category) => <button key={category} className="category-tab" type="button" role="tab" aria-selected={state.selectedCategory === category} onClick={() => actions.setCategory(category)}>{labelFrom(CATEGORY_LABELS, category, locale)}</button>)}</div>
     {subcategories.length > 1 && <div className="subcategory-tabs" role="tablist" aria-label={t(locale, "subcategories")}>{subcategories.map((subcategory) => <button key={subcategory} className="subcategory-tab" type="button" role="tab" aria-selected={state.selectedSubcategory === subcategory} onClick={() => actions.setSubcategory(subcategory)}>{labelFrom(SUBCATEGORY_LABELS, subcategory, locale)}</button>)}</div>}
     <div className="market-meta"><span>{visible.length} {t(locale, "items")}</span><label className="sort-control" htmlFor="sortSelect"><span>{t(locale, "sort")}</span><select id="sortSelect" value={state.sort} onChange={(e) => actions.setSort(e.target.value as SortMode)}><option value="price-asc">{t(locale, "priceAsc")}</option><option value="price-desc">{t(locale, "priceDesc")}</option><option value="owned">{t(locale, "owned")}</option></select></label></div>
-    <div className="product-grid">{visible.map(({ asset, product }) => <ProductCard key={asset.id} product={product} price={0} owned={0} overdraft={false} currency={asset.currency} live={asset.quoteStatus === "ACTIVE"} selected={focusedProductId === asset.id} liquidated={false} locale={locale} activeSide={activeTrade?.id === asset.id ? activeTrade.side : null} onOpenTicket={openTicket} onCloseTicket={() => setActiveTrade(null)} />)}</div>
+    <div className="product-grid">{visible.map(({ asset, product }) => <ProductCard key={asset.id} product={product} price={0} owned={0} overdraft={false} currency={asset.currency} live={asset.quoteStatus === "ACTIVE"} selected={focusedProductId === asset.id} locale={locale} activeSide={activeTrade?.id === asset.id ? activeTrade.side : null} onOpenTicket={openTicket} onCloseTicket={() => setActiveTrade(null)} />)}</div>
   </section>;
 }

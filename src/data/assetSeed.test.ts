@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildAssetSeed } from "./assetSeed";
 import { getInvestmentProducts } from "./categories";
-import { getQuoteSymbol } from "../game/pricing";
+import { getQuoteSymbol } from "./quoteSymbols";
 
 describe("buildAssetSeed", () => {
   it("builds the complete enabled asset catalogue in display order", () => {

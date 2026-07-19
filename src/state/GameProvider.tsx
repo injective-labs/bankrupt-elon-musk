@@ -21,25 +21,12 @@ export interface GameApi {
 export type AuthStatus = "loading" | "locked" | "authenticated" | "expired";
 type PendingCommand = "login" | "logout" | "trade" | "reset" | "refresh";
 
-interface Preferences { locale: Locale; sound: boolean; selectedCategory: string; selectedSubcategory: string; search: string; sort: SortMode; leverage: number }
-const initialPreferences: Preferences = { locale: "zh", sound: true, selectedCategory: "全部", selectedSubcategory: ALL_SUBCATEGORY, search: "", sort: "price-asc", leverage: 1 };
+interface Preferences { locale: Locale; sound: boolean; selectedCategory: string; selectedSubcategory: string; search: string; sort: SortMode }
+const initialPreferences: Preferences = { locale: "zh", sound: true, selectedCategory: "全部", selectedSubcategory: ALL_SUBCATEGORY, search: "", sort: "price-asc" };
 
-function projectionState(account: AccountProjection | null, preferences: Preferences): GameState {
-  const positions = account?.positions ?? [];
-  const assets = account?.assets ?? [];
+function projectionState(preferences: Preferences): GameState {
   return {
-    inventory: Object.fromEntries(positions.map((position) => [position.assetId, { quantity: Number(position.quantity), costBasis: Number(position.costBasis) }])),
-    cash: account ? Number(account.cash) : 0,
-    debt: 0,
-    accruedInterest: 0,
-    lastInterestAccruedAt: 0,
-    liquidated: false,
-    leverage: preferences.leverage,
-    prices: Object.fromEntries(assets.filter((asset) => asset.usdPrice !== null).map((asset) => [asset.id, { nativePrice: Number(asset.usdPrice), usdPrice: Number(asset.usdPrice), currency: asset.currency, closeDate: asset.marketDate ?? "", source: "server", updatedAt: account?.updatedAt ?? "" }])),
-    fxRates: { USD: 1 },
-    lastPriceRefresh: account?.marketAsOf ?? null,
     locale: preferences.locale,
-    log: [],
     selectedCategory: preferences.selectedCategory,
     selectedSubcategory: preferences.selectedSubcategory,
     search: preferences.search,
@@ -67,7 +54,6 @@ export interface GameActions {
   buy(id: string): Promise<void>; buyQty(id: string, quantity: string): Promise<void>; buyMax(id: string): Promise<void>;
   sell(id: string): Promise<void>; sellQty(id: string, quantity: string): Promise<void>; sellAll(id: string): Promise<void>;
   reset(): Promise<void>; refreshPricesNow(): Promise<void>;
-  setLeverage(value: number): void; borrow(amount: number | null): void; repay(amount: number | null): void; settleInterest(): void; clearLog(): void;
   toggleSound(): void; toggleLocale(): void; setCategory(category: string): void; setSubcategory(subcategory: string): void; setSearch(search: string): void; setSort(sort: SortMode): void; focusProduct(id: string): void;
 }
 
@@ -169,13 +155,12 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
     buyMax: (id) => trade(id, "BUY", "MAX"),
     sell: (id) => explicitQuantity(id, "SELL", "1"), sellQty: (id, amount) => explicitQuantity(id, "SELL", amount), sellAll: (id) => trade(id, "SELL", "MAX"),
     reset: () => command("reset", () => api.resetGame(idempotencyKey())), refreshPricesNow: () => command("refresh", api.getGame),
-    setLeverage: (leverage) => setPreferences((p) => ({ ...p, leverage })), borrow: () => undefined, repay: () => undefined, settleInterest: () => undefined, clearLog: () => undefined,
     toggleSound: () => setPreferences((p) => ({ ...p, sound: !p.sound })), toggleLocale: () => setPreferences((p) => ({ ...p, locale: p.locale === "zh" ? "en" : "zh" })),
     setCategory: (selectedCategory) => setPreferences((p) => ({ ...p, selectedCategory, selectedSubcategory: ALL_SUBCATEGORY })), setSubcategory: (selectedSubcategory) => setPreferences((p) => ({ ...p, selectedSubcategory })), setSearch: (search) => setPreferences((p) => ({ ...p, search })), setSort: (sort) => setPreferences((p) => ({ ...p, sort })),
     focusProduct: (id) => { setFocusedProductId(id); requestAnimationFrame(() => document.querySelector(`[data-product-id="${id}"]`)?.scrollIntoView?.({ block: "center" })); },
   }), [api, command, explicitQuantity, fail, loadGame, trade]);
 
-  const state = useMemo(() => projectionState(account, preferences), [account, preferences]);
+  const state = useMemo(() => projectionState(preferences), [preferences]);
   useEffect(() => { const update = () => setClockNow(new Date()); update(); const id = setInterval(update, 1000); return () => clearInterval(id); }, []);
   const tradingLocked = isSettlementLocked(clockNow);
   useEffect(() => {

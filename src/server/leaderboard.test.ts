@@ -34,7 +34,7 @@ describe("getLossLeaderboard", () => {
 
     const result = await getLossLeaderboard("0x1111111111111111111111111111111111111111", 1);
 
-    expect(result.top).toEqual([{ address: "0x2222…2222", walletName: "two", pnl: "-49999999945", netWorth: "55", liquidated: false }]);
+    expect(result.top).toEqual([{ address: "0x2222…2222", walletName: "two", pnl: "-49999999945", netWorth: "55" }]);
     expect(result.you).toEqual({ rank: 12, total: 20, pnl: "-49999999700" });
     expect(mocks.transaction.mock.calls[0][1]).toEqual({ isolationLevel: "RepeatableRead" });
 

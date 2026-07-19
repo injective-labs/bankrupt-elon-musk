@@ -109,7 +109,7 @@ export const getTransactions = async (cursor?: string, limit = 50): Promise<Tran
 };
 export const getLeaderboard = async (): Promise<LeaderboardSnapshot> => {
   const value = await response<unknown>(fetch("/api/leaderboard", json("GET")));
-  const validRow = (row: unknown) => record(row) && typeof row.address === "string" && (row.walletName === undefined || stringOrNull(row.walletName)) && decimal(row.pnl) && decimal(row.netWorth) && typeof row.liquidated === "boolean";
+  const validRow = (row: unknown) => record(row) && typeof row.address === "string" && (row.walletName === undefined || stringOrNull(row.walletName)) && decimal(row.pnl) && decimal(row.netWorth);
   const validYou = (you: unknown) => you === undefined || you === null || record(you) && typeof you.rank === "number" && typeof you.total === "number" && decimal(you.pnl);
   if (!record(value) || !Array.isArray(value.top) || !value.top.every(validRow) || typeof value.total !== "number" || !validYou(value.you)) invalidResponse("Leaderboard response is malformed");
   return value as unknown as LeaderboardSnapshot;
