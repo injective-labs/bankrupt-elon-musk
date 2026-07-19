@@ -13,7 +13,7 @@ describe("isQuoteFresh", () => {
     expect(isQuoteFresh(new Date("2026-07-11T23:59:00-12:00"), now)).toBe(true); // July 12 UTC
   });
 
-  it("accepts future market dates", () => {
-    expect(isQuoteFresh(new Date("2026-07-21T00:00:00Z"), new Date("2026-07-19T23:59:59Z"))).toBe(true);
+  it("rejects future market dates", () => {
+    expect(isQuoteFresh(new Date("2026-07-21T00:00:00Z"), new Date("2026-07-19T23:59:59Z"))).toBe(false);
   });
 });

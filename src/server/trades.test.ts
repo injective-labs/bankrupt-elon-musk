@@ -5,10 +5,10 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(), player: vi.fn(), asset: vi.fn(), position: vi.fn(),
   transactionFind: vi.fn(), playerUpdate: vi.fn(), positionUpsert: vi.fn(),
   positionUpdate: vi.fn(), positionDelete: vi.fn(), transactionCreate: vi.fn(),
-  projection: vi.fn(), history: vi.fn(),
+  transactionUpdate: vi.fn(), projection: vi.fn(), history: vi.fn(), replayFind: vi.fn(),
 }));
-vi.mock("./db", () => ({ prisma: { $transaction: mocks.transaction, transaction: { findMany: mocks.history } } }));
-vi.mock("./account", () => ({ getAccountProjection: mocks.projection }));
+vi.mock("./db", () => ({ prisma: { $transaction: mocks.transaction, transaction: { findMany: mocks.history, findUnique: mocks.replayFind } } }));
+vi.mock("./account", () => ({ getAccountProjectionInTransaction: mocks.projection }));
 vi.mock("@/game/marketClock", () => ({ isSettlementLocked: vi.fn(() => false) }));
 
 import { executeTrade, getTradeHistory } from "./trades";
@@ -22,7 +22,7 @@ function tx() {
   return {
     player: { findUnique: mocks.player, update: mocks.playerUpdate },
     asset: { findUnique: mocks.asset }, position: { findUnique: mocks.position, upsert: mocks.positionUpsert, update: mocks.positionUpdate, delete: mocks.positionDelete },
-    transaction: { findUnique: mocks.transactionFind, create: mocks.transactionCreate },
+    transaction: { findUnique: mocks.transactionFind, create: mocks.transactionCreate, update: mocks.transactionUpdate },
   };
 }
 
@@ -30,10 +30,11 @@ describe("executeTrade", () => {
   beforeEach(() => {
     vi.clearAllMocks(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-07-19T12:00:00Z"));
     mocks.transaction.mockImplementation((fn) => fn(tx()));
-    mocks.transactionFind.mockResolvedValue(null); mocks.position.mockResolvedValue(null);
+    mocks.transactionFind.mockResolvedValue(null); mocks.position.mockResolvedValue(null); mocks.replayFind.mockResolvedValue(null);
+    mocks.transactionCreate.mockResolvedValue({ id: 1n });
     mocks.player.mockResolvedValue({ cash: d("100"), updatedAt: new Date() });
     mocks.asset.mockResolvedValue({ id: "stock", enabled: true, quoteMultiplier: d("1"), quote: { nativePrice: d("5"), currency: "USD", fxRateToUsd: d("1"), usdPrice: d("5"), marketDate: new Date("2026-07-18"), status: "ACTIVE" } });
-    mocks.projection.mockResolvedValue({ cash: "90" });
+    mocks.projection.mockResolvedValue({ walletAddress: wallet, cash: "90", holdingsValue: "10", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "2026-07-19T12:00:00.000Z" });
   });
 
   it("buys using exact Decimal accounting and accumulates weighted total cost basis", async () => {
@@ -81,9 +82,53 @@ describe("executeTrade", () => {
   });
 
   it("returns idempotently without a second mutation", async () => {
-    mocks.transactionFind.mockResolvedValue({ id: 1n });
-    await executeTrade(wallet, command);
-    expect(mocks.playerUpdate).not.toHaveBeenCalled(); expect(mocks.projection).toHaveBeenCalledOnce();
+    const stable = { walletAddress: wallet, cash: "77", holdingsValue: "23", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "2026-07-19T10:00:00.000Z" };
+    mocks.transactionFind.mockResolvedValue({ id: 1n, commandSnapshot: command, resultSnapshot: stable });
+    await expect(executeTrade(wallet, command)).resolves.toEqual(stable);
+    expect(mocks.playerUpdate).not.toHaveBeenCalled(); expect(mocks.projection).not.toHaveBeenCalled();
+  });
+
+  it("rejects an idempotency key reused with a different command", async () => {
+    mocks.transactionFind.mockResolvedValue({ id: 1n, commandSnapshot: { ...command, quantity: "3" }, resultSnapshot: { cash: "1" } });
+    await expect(executeTrade(wallet, command)).rejects.toMatchObject({ status: 422, code: "IDEMPOTENCY_KEY_REUSED" });
+  });
+
+  it.each([
+    [{ assetId: 1 }, { cash: "1" }],
+    [command, { cash: 1 }],
+  ])("rejects malformed persisted JSON snapshots", async (commandSnapshot, resultSnapshot) => {
+    mocks.transactionFind.mockResolvedValue({ id: 1n, commandSnapshot, resultSnapshot });
+    await expect(executeTrade(wallet, command)).rejects.toMatchObject({ status: 500, code: "INVALID_TRADE_SNAPSHOT" });
+  });
+
+  it("persists the command and stable projection in the ledger", async () => {
+    const result = await executeTrade(wallet, command);
+    expect(mocks.transactionCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ commandSnapshot: command }) }));
+    expect(mocks.transactionUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { resultSnapshot: result } }));
+  });
+
+  it("replays only a P2002 on the trade idempotency unique key", async () => {
+    const stable = { walletAddress: wallet, cash: "90", holdingsValue: "10", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "2026-07-19T12:00:00.000Z" };
+    mocks.transaction.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002", meta: { target: ["walletAddress", "idempotencyKey"] } }));
+    mocks.replayFind.mockResolvedValue({ commandSnapshot: command, resultSnapshot: stable });
+    await expect(executeTrade(wallet, command)).resolves.toEqual(stable);
+    mocks.transaction.mockRejectedValueOnce(Object.assign(new Error("other unique"), { code: "P2002", meta: { target: ["assetId"] } }));
+    await expect(executeTrade(wallet, { ...command, idempotencyKey: "00000000-0000-4000-8000-000000000009" })).rejects.toThrow("other unique");
+  });
+
+  it.each([
+    ["explicit quantity overflow", { ...command, quantity: "1000000000000000000" }],
+    ["BUY MAX quantity overflow", { ...command, quantity: "MAX" }],
+  ])("rejects %s before any write", async (name, input) => {
+    if (name.includes("MAX")) { mocks.player.mockResolvedValue({ cash: d("50000000000") }); mocks.asset.mockResolvedValue({ id: "stock", enabled: true, quote: { nativePrice: d("0.000000000001"), currency: "USD", fxRateToUsd: d("1"), usdPrice: d("0.000000000001"), marketDate: new Date("2026-07-18"), status: "ACTIVE" } }); }
+    await expect(executeTrade(wallet, input as never)).rejects.toMatchObject({ status: 422, code: "VALUE_OUT_OF_RANGE" });
+    expect(mocks.transactionCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a monetary result with more than eight decimal places", async () => {
+    mocks.asset.mockResolvedValue({ id: "stock", enabled: true, quote: { nativePrice: d("0.123456789"), currency: "USD", fxRateToUsd: d("1"), usdPrice: d("0.123456789"), marketDate: new Date("2026-07-18"), status: "ACTIVE" } });
+    await expect(executeTrade(wallet, command)).rejects.toMatchObject({ status: 422, code: "VALUE_OUT_OF_RANGE" });
+    expect(mocks.transactionCreate).not.toHaveBeenCalled();
   });
 
   it("uses Serializable isolation and retries P2034 conflicts only a bounded number", async () => {
@@ -100,5 +145,8 @@ describe("getTradeHistory", () => {
     const page = await getTradeHistory(wallet, { limit: 999 });
     expect(mocks.history).toHaveBeenCalledWith(expect.objectContaining({ take: 101 }));
     expect(page.rows).toHaveLength(100); expect(page.nextCursor).toBe("2");
+  });
+  it.each(["0", "-1", "+1", "1.5", "9223372036854775808"])("rejects invalid signed-int64 cursor %s", async (cursor) => {
+    await expect(getTradeHistory(wallet, { cursor })).rejects.toMatchObject({ status: 422, code: "INVALID_CURSOR" });
   });
 });

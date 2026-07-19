@@ -1,7 +1,7 @@
 import { Prisma, type Transaction } from "@prisma/client";
 import type { AccountProjection, TransactionView } from "@/types";
 import { isSettlementLocked } from "@/game/marketClock";
-import { getAccountProjection } from "./account";
+import { getAccountProjectionInTransaction } from "./account";
 import { prisma } from "./db";
 import { ApiError } from "./http/errors";
 import { isQuoteFresh } from "./quoteFreshness";
@@ -14,6 +14,9 @@ export interface TradeCommand {
 }
 
 const MAX_ATTEMPTS = 3;
+const MAX_QUANTITY = new Prisma.Decimal("999999999999999999.999999999999");
+const MAX_MONEY = new Prisma.Decimal("9999999999999999999999.99999999");
+const MAX_CURSOR = 9223372036854775807n;
 const positionKey = (walletAddress: string, assetId: string) => ({ walletAddress_assetId: { walletAddress, assetId } });
 
 function quantityFrom(value: string): Prisma.Decimal {
@@ -29,14 +32,57 @@ function conflict(error: unknown): boolean {
     : typeof error === "object" && error !== null && "code" in error && error.code === "P2034";
 }
 
+function idempotencyConflict(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "P2002") return false;
+  const meta = "meta" in error && typeof error.meta === "object" && error.meta !== null ? error.meta as { target?: unknown } : {};
+  return meta.target === "Transaction_walletAddress_idempotencyKey_key"
+    || (Array.isArray(meta.target) && meta.target.length === 2 && meta.target[0] === "walletAddress" && meta.target[1] === "idempotencyKey");
+}
+
+function storedCommand(value: unknown): TradeCommand {
+  if (!isRecord(value) || typeof value.assetId !== "string" || (value.side !== "BUY" && value.side !== "SELL") || typeof value.quantity !== "string" || typeof value.idempotencyKey !== "string") {
+    throw new ApiError(500, "INVALID_TRADE_SNAPSHOT", "Stored trade command is invalid");
+  }
+  return { assetId: value.assetId, side: value.side, quantity: value.quantity, idempotencyKey: value.idempotencyKey };
+}
+
+function isStringOrNull(value: unknown): value is string | null { return typeof value === "string" || value === null; }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function projectionSnapshot(value: unknown): AccountProjection {
+  if (!isRecord(value)
+    || typeof value.walletAddress !== "string" || !isStringOrNull(value.walletName ?? null)
+    || typeof value.cash !== "string" || typeof value.holdingsValue !== "string" || typeof value.netWorth !== "string" || typeof value.pnl !== "string"
+    || !Array.isArray(value.positions) || !Array.isArray(value.assets) || !Array.isArray(value.recentTransactions)
+    || !isStringOrNull(value.marketAsOf) || typeof value.settlementLocked !== "boolean" || typeof value.updatedAt !== "string") {
+    throw new ApiError(500, "INVALID_TRADE_SNAPSHOT", "Stored trade result is invalid");
+  }
+  const validPositions = value.positions.every((item) => isRecord(item) && typeof item.assetId === "string" && typeof item.quantity === "string" && typeof item.costBasis === "string" && isStringOrNull(item.marketValue) && isStringOrNull(item.unrealizedPnl));
+  const validAssets = value.assets.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string" && typeof item.category === "string" && typeof item.ticker === "string" && typeof item.currency === "string" && typeof item.unit === "string" && typeof item.enabled === "boolean" && typeof item.displayOrder === "number" && isStringOrNull(item.usdPrice) && isStringOrNull(item.marketDate) && ["ACTIVE", "STALE", "ERROR", "MISSING"].includes(String(item.quoteStatus)));
+  const validTransactions = value.recentTransactions.every((item) => isRecord(item) && typeof item.id === "string" && ["BUY", "SELL", "RESET"].includes(String(item.type)) && isStringOrNull(item.assetId) && isStringOrNull(item.quantity) && isStringOrNull(item.usdUnitPrice) && typeof item.usdAmount === "string" && typeof item.createdAt === "string");
+  if (!validPositions || !validAssets || !validTransactions) throw new ApiError(500, "INVALID_TRADE_SNAPSHOT", "Stored trade result is invalid");
+  return value as unknown as AccountProjection;
+}
+
+function assertDecimal(value: Prisma.Decimal, max: Prisma.Decimal, scale: number): void {
+  if (!value.isFinite() || value.abs().gt(max) || value.decimalPlaces() > scale) {
+    throw new ApiError(422, "VALUE_OUT_OF_RANGE", "Trade value exceeds supported precision or range");
+  }
+}
+
+function replay(row: { commandSnapshot: Prisma.JsonValue; resultSnapshot: Prisma.JsonValue }, command: TradeCommand): AccountProjection {
+  const original = storedCommand(row.commandSnapshot);
+  if (original.assetId !== command.assetId || original.side !== command.side || original.quantity !== command.quantity || original.idempotencyKey !== command.idempotencyKey) throw new ApiError(422, "IDEMPOTENCY_KEY_REUSED", "Idempotency key was already used for another command");
+  return projectionSnapshot(row.resultSnapshot);
+}
+
 export async function executeTrade(walletAddress: string, command: TradeCommand): Promise<AccountProjection> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
         const duplicate = await tx.transaction.findUnique({
           where: { walletAddress_idempotencyKey: { walletAddress, idempotencyKey: command.idempotencyKey } },
         });
-        if (duplicate) return;
+        if (duplicate) return replay(duplicate, command);
         const now = new Date();
         if (isSettlementLocked(now)) throw new ApiError(422, "SETTLEMENT_LOCKED", "Trading is locked during settlement");
         const [player, asset, position] = await Promise.all([
@@ -57,6 +103,7 @@ export async function executeTrade(walletAddress: string, command: TradeCommand)
           quantity = command.side === "BUY" ? player.cash.div(price).floor() : (position?.quantity ?? new Prisma.Decimal(0));
           if (!quantity.gt(0)) throw new ApiError(422, command.side === "BUY" ? "INSUFFICIENT_CASH" : "INSUFFICIENT_HOLDINGS", "Nothing is available to trade");
         } else quantity = quantityFrom(command.quantity);
+        assertDecimal(quantity, MAX_QUANTITY, 12);
 
         const amount = price.mul(quantity);
         const quantityBefore = position?.quantity ?? new Prisma.Decimal(0);
@@ -75,16 +122,28 @@ export async function executeTrade(walletAddress: string, command: TradeCommand)
           if (quantityAfter.isZero()) await tx.position.delete({ where: positionKey(walletAddress, command.assetId) });
           else await tx.position.update({ where: positionKey(walletAddress, command.assetId), data: { quantity: quantityAfter, costBasis: costAfter } });
         }
+        assertDecimal(quantityAfter, MAX_QUANTITY, 12);
+        for (const value of [amount, cashAfter, costAfter, player.cash, costBefore]) assertDecimal(value, MAX_MONEY, 8);
         await tx.player.update({ where: { walletAddress }, data: { cash: cashAfter } });
-        await tx.transaction.create({ data: {
+        const ledger = await tx.transaction.create({ data: {
           walletAddress, idempotencyKey: command.idempotencyKey, type: command.side, assetId: command.assetId,
+          commandSnapshot: command as unknown as Prisma.InputJsonValue,
+          resultSnapshot: {},
           quantity, nativePrice: quote.nativePrice, currency: quote.currency, fxRateToUsd: quote.fxRateToUsd,
           usdUnitPrice: price, usdAmount: amount, cashBefore: player.cash, cashAfter,
           quantityBefore, quantityAfter, costBasisBefore: costBefore, costBasisAfter: costAfter, marketDate: quote.marketDate,
-        } });
+        }, select: { id: true } });
+        const snapshot = await getAccountProjectionInTransaction(tx, walletAddress);
+        await tx.transaction.update({ where: { id: ledger.id }, data: { resultSnapshot: snapshot as unknown as Prisma.InputJsonValue } });
+        return snapshot;
       }, { isolationLevel: "Serializable" });
-      return getAccountProjection(walletAddress);
+      return result;
     } catch (error) {
+      if (idempotencyConflict(error)) {
+        const duplicate = await prisma.transaction.findUnique({ where: { walletAddress_idempotencyKey: { walletAddress, idempotencyKey: command.idempotencyKey } } });
+        if (!duplicate) throw new ApiError(409, "TRADE_CONFLICT", "Concurrent idempotent trade could not be replayed");
+        return replay(duplicate, command);
+      }
       if (!conflict(error)) throw error;
       if (attempt === MAX_ATTEMPTS) throw new ApiError(409, "TRADE_CONFLICT", "Trade conflicted with another request; retry with the same idempotency key");
     }
@@ -101,8 +160,9 @@ export async function getTradeHistory(walletAddress: string, options: { cursor?:
   const limit = Math.max(1, Math.min(rawLimit, 100));
   let cursor: bigint | undefined;
   if (options.cursor !== undefined) {
+    if (!/^\d+$/.test(options.cursor)) throw new ApiError(422, "INVALID_CURSOR", "Invalid history cursor");
     try { cursor = BigInt(options.cursor); } catch { throw new ApiError(422, "INVALID_CURSOR", "Invalid history cursor"); }
-    if (cursor < 1n) throw new ApiError(422, "INVALID_CURSOR", "Invalid history cursor");
+    if (cursor < 1n || cursor > MAX_CURSOR) throw new ApiError(422, "INVALID_CURSOR", "Invalid history cursor");
   }
   const rows = await prisma.transaction.findMany({ where: { walletAddress, ...(cursor ? { id: { lt: cursor } } : {}) }, orderBy: { id: "desc" }, take: limit + 1 });
   const hasMore = rows.length > limit;

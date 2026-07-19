@@ -5,5 +5,6 @@ function utcCalendarDay(date: Date): number {
 }
 
 export function isQuoteFresh(marketDate: Date, now: Date = new Date()): boolean {
-  return utcCalendarDay(now) - utcCalendarDay(marketDate) <= 7;
+  const age = utcCalendarDay(now) - utcCalendarDay(marketDate);
+  return age >= 0 && age <= 7;
 }

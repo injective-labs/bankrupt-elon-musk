@@ -225,6 +225,8 @@ CREATE TABLE "Transaction" (
   "id" BIGSERIAL NOT NULL,
   "walletAddress" TEXT NOT NULL,
   "idempotencyKey" TEXT NOT NULL,
+  "commandSnapshot" JSONB NOT NULL,
+  "resultSnapshot" JSONB NOT NULL,
   "type" "TransactionType" NOT NULL,
   "assetId" TEXT,
   "quantity" DECIMAL(30,12),

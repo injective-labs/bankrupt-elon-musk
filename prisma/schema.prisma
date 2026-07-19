@@ -50,6 +50,8 @@ model Transaction {
   id              BigInt          @id @default(autoincrement())
   walletAddress   String
   idempotencyKey  String
+  commandSnapshot Json
+  resultSnapshot  Json
   type            TransactionType
   assetId         String?
   quantity        Decimal?        @db.Decimal(30, 12)

@@ -37,8 +37,10 @@ function decimal(value: Prisma.Decimal): string {
   return value.toString();
 }
 
-export async function getAccountProjection(walletAddress: string): Promise<AccountProjection> {
-  const { player, assets, transactions } = await prisma.$transaction(async (tx) => {
+export async function getAccountProjectionInTransaction(
+  tx: Prisma.TransactionClient,
+  walletAddress: string,
+): Promise<AccountProjection> {
     const [snapshotPlayer, snapshotAssets, snapshotTransactions] = await Promise.all([
       tx.player.findUnique({ where: { walletAddress }, include: { positions: true } }),
       tx.asset.findMany({
@@ -52,8 +54,7 @@ export async function getAccountProjection(walletAddress: string): Promise<Accou
         take: 50,
       }),
     ]);
-    return { player: snapshotPlayer, assets: snapshotAssets, transactions: snapshotTransactions };
-  }, { isolationLevel: "RepeatableRead" });
+  const { player, assets, transactions } = { player: snapshotPlayer, assets: snapshotAssets, transactions: snapshotTransactions };
   if (!player) throw new ApiError(404, "PLAYER_NOT_FOUND", "Player not found");
 
   const now = new Date();
@@ -133,4 +134,11 @@ export async function getAccountProjection(walletAddress: string): Promise<Accou
     settlementLocked: isSettlementLocked(now),
     updatedAt: player.updatedAt.toISOString(),
   };
+}
+
+export async function getAccountProjection(walletAddress: string): Promise<AccountProjection> {
+  return prisma.$transaction(
+    (tx) => getAccountProjectionInTransaction(tx, walletAddress),
+    { isolationLevel: "RepeatableRead" },
+  );
 }
