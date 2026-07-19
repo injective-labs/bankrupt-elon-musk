@@ -121,7 +121,11 @@ export async function persistDailyBarIfCurrent(
         "status" = EXCLUDED."status",
         "fetchedAt" = EXCLUDED."fetchedAt",
         "updatedAt" = EXCLUDED."updatedAt"
-      WHERE "AssetQuote"."marketDate" <= EXCLUDED."marketDate"
+      WHERE "AssetQuote"."marketDate" < EXCLUDED."marketDate"
+         OR (
+           "AssetQuote"."marketDate" = EXCLUDED."marketDate"
+           AND "AssetQuote"."fetchedAt" <= EXCLUDED."fetchedAt"
+         )
       RETURNING "marketDate"
     `);
     if (accepted.length === 0) return null;

@@ -208,6 +208,52 @@ describe("refreshMarket", () => {
     expect(finalQuote.close.toString()).toBe("210");
   });
 
+  it("does not let an older run overwrite newer values for the same market date", async () => {
+    mocks.assetFindMany.mockResolvedValue([usdAsset]);
+    let stored: { marketDate: Date; close: Prisma.Decimal; fetchedAt: Date } | null = null;
+    mocks.quoteFindUnique.mockImplementation(async () => stored);
+    mocks.fetchDailyBar
+      .mockResolvedValueOnce(bar("AAPL", 190, "USD", "2026-07-18"))
+      .mockResolvedValueOnce(bar("AAPL", 210, "USD", "2026-07-18"));
+
+    let releaseOlder!: () => void;
+    const olderPaused = new Promise<void>((resolve) => { releaseOlder = resolve; });
+    let transactionNumber = 0;
+    mocks.transaction.mockImplementation(async (callback) => {
+      transactionNumber += 1;
+      if (transactionNumber === 1) await olderPaused;
+      return callback({
+        assetDailyPrice: { upsert: mocks.dailyUpsert },
+        $queryRaw: vi.fn(async (sql) => {
+          const [, close, , , , marketDate, , fetchedAt] = sql.values;
+          expect(sql.strings.join(" ")).toMatch(/"fetchedAt"\s*<=\s*EXCLUDED\."fetchedAt"/);
+          if (stored && (stored.marketDate > marketDate
+            || (stored.marketDate.getTime() === marketDate.getTime()
+              && stored.fetchedAt > fetchedAt))) return [];
+          stored = { marketDate, close, fetchedAt };
+          return [{ marketDate }];
+        }),
+      });
+    });
+
+    const older = refreshMarket({ now: new Date("2026-07-19T10:00:00Z") });
+    await vi.waitFor(() => expect(mocks.transaction).toHaveBeenCalledTimes(1));
+    const newer = refreshMarket({ now: new Date("2026-07-19T11:00:00Z") });
+    await newer;
+    releaseOlder();
+    await older;
+
+    expect(stored).not.toBeNull();
+    const finalQuote = stored as unknown as {
+      marketDate: Date;
+      close: Prisma.Decimal;
+      fetchedAt: Date;
+    };
+    expect(finalQuote.marketDate).toEqual(new Date("2026-07-18"));
+    expect(finalQuote.close.toString()).toBe("210");
+    expect(finalQuote.fetchedAt).toEqual(new Date("2026-07-19T11:00:00Z"));
+  });
+
   it("does not let an older failed run mark a newer successful quote as error", async () => {
     mocks.assetFindMany.mockResolvedValue([usdAsset]);
     let stored: { marketDate: Date; fetchedAt: Date; status: string } | null = null;

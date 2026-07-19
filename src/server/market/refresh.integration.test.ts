@@ -66,4 +66,47 @@ describeDatabase("atomic market persistence (PostgreSQL)", () => {
     expect(quote.nativePrice.toString()).toBe("210");
     expect(daily.map((row) => row.marketDate)).toEqual([new Date("2026-07-18")]);
   });
+
+  it("keeps the newer run's values when both runs return the same market date", async () => {
+    const asset = {
+      id: assetId,
+      quoteSymbol: "T4TEST-USD",
+      currency: "USD",
+      quoteMultiplier: new Prisma.Decimal(1),
+    };
+    const makeBar = (close: number) => ({
+      symbol: asset.quoteSymbol,
+      marketDate: new Date("2026-07-18T00:00:00Z"),
+      open: close,
+      high: close,
+      low: close,
+      close,
+      currency: "USD",
+    });
+
+    await persistDailyBarIfCurrent(
+      asset,
+      makeBar(220),
+      new Prisma.Decimal("1.01"),
+      new Date("2026-07-19T13:00:00Z"),
+    );
+    await persistDailyBarIfCurrent(
+      asset,
+      makeBar(180),
+      new Prisma.Decimal("0.99"),
+      new Date("2026-07-19T12:00:00Z"),
+    );
+
+    const quote = await prisma.assetQuote.findUniqueOrThrow({ where: { assetId } });
+    const daily = await prisma.assetDailyPrice.findUniqueOrThrow({
+      where: { assetId_marketDate: { assetId, marketDate: new Date("2026-07-18") } },
+    });
+    expect(quote.nativePrice.toString()).toBe("220");
+    expect(quote.fxRateToUsd.toString()).toBe("1.01");
+    expect(quote.usdPrice.toString()).toBe("222.2");
+    expect(quote.fetchedAt).toEqual(new Date("2026-07-19T13:00:00Z"));
+    expect(daily.close.toString()).toBe("220");
+    expect(daily.fxRateToUsd.toString()).toBe("1.01");
+    expect(daily.usdClose.toString()).toBe("222.2");
+  });
 });
