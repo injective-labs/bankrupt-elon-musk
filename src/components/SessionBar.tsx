@@ -24,7 +24,7 @@ function segmentRangeLabel(locale: Locale, type: SegmentType, range: SessionSegm
 }
 
 export function SessionBar() {
-  const { state } = useGame();
+  const { state, account } = useGame();
   const locale = state.locale;
   const [now, setNow] = useState(() => new Date());
 
@@ -34,11 +34,12 @@ export function SessionBar() {
   }, []);
 
   const session = getTradingSessionState(now);
+  const locked = Boolean(account?.settlementLocked || session.locked);
   const segmentTypes: SegmentType[] = ["before", "settlement", "after"];
 
   return (
     <section
-      className={`session-bar${session.locked ? " is-locked" : ""}`}
+      className={`session-bar${locked ? " is-locked" : ""}`}
       aria-live="polite"
       style={{ ["--session-progress" as string]: `${session.markerPercent.toFixed(2)}%` }}
     >
@@ -46,15 +47,15 @@ export function SessionBar() {
         <div className="session-title-row">
           <div className="session-title-copy">
             <span className="session-pill">
-              {session.locked ? t(locale, "settlementMode") : t(locale, "tradingOpen")}
+              {locked ? t(locale, "settlementMode") : t(locale, "tradingOpen")}
             </span>
             <strong>{t(locale, "tradingSession")}</strong>
-            {session.locked && (
+            {locked && (
               <span className="session-warning" aria-hidden="true">
                 !
               </span>
             )}
-            {session.locked && (
+            {locked && (
               <span
                 className="session-help"
                 tabIndex={0}
@@ -70,7 +71,7 @@ export function SessionBar() {
               {t(locale, "nextCloseTime")} {formatMarketCloseTime(session.nextClose, locale)} HKT
             </span>
             <strong>
-              {session.locked
+              {locked
                 ? t(locale, "clearingNow")
                 : formatRefreshDuration(session.countdownTarget.getTime() - now.getTime(), locale)}
             </strong>

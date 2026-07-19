@@ -1,198 +1,44 @@
 "use client";
 
-import { useMemo } from "react";
 import { useGame } from "@/state/GameProvider";
 import { t } from "@/i18n";
-import { STARTING_BALANCE, FX_DISPLAY_ORDER, FALLBACK_FX } from "@/data/constants";
 import { productById } from "@/data/expandedAssets";
-import { getInvestmentProducts } from "@/data/categories";
-import { formatCurrency, formatNumber, formatPercentValue, formatFxRate } from "@/game/format";
-import {
-  getBalance,
-  getNetWorth,
-  getHoldingsValue,
-  getPnl,
-  getLossRanking,
-  getProductPrice,
-  getProductName,
-  getPositionQuantity,
-  getPositionCost,
-} from "@/game/engine";
-import type { Product, Position } from "@/types";
+import { formatDecimalCurrency, formatDecimalNumber } from "@/game/format";
+
+const numericTone = (value: string) => Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "neutral";
 
 export function PortfolioPanel() {
-  const { state, actions, focusedProductId } = useGame();
+  const { account, state, actions, focusedProductId, leaderboard, leaderboardError } = useGame();
   const locale = state.locale;
+  const positions = account?.positions ?? [];
+  const assets = new Map((account?.assets ?? []).map((asset) => [asset.id, asset]));
+  const rank = leaderboard?.you;
 
-  const cash = getBalance(state);
-  const netWorth = getNetWorth(state);
-  const assetBalance = getHoldingsValue(state);
-  const pnl = getPnl(state);
-  const returnRatio = pnl / STARTING_BALANCE;
-  const pnlTone = pnl > 0 ? "positive" : pnl < 0 ? "negative" : "neutral";
-
-  const status = getLossRanking(state);
-
-  // FX rates for the currencies actually used by tradeable assets (non-USD).
-  const displayedFx = useMemo(() => {
-    const active = new Set<string>();
-    getInvestmentProducts().forEach((product) => {
-      const declared = product.currency || "USD";
-      const quote = state.prices?.[product.id]?.currency;
-      [declared, quote].forEach((currency) => {
-        if (currency && currency !== "USD") active.add(currency);
-      });
-    });
-    return FX_DISPLAY_ORDER.filter(([currency]) => active.has(currency));
-  }, [state.prices]);
-
-  const entries = Object.entries(state.inventory)
-    .map(([id, position]) => ({ product: productById.get(id), position }))
-    .filter((entry): entry is { product: Product; position: Position } => Boolean(entry.product))
-    .sort(
-      (a, b) =>
-        getProductPrice(state, b.product) * getPositionQuantity(b.position) -
-        getProductPrice(state, a.product) * getPositionQuantity(a.position),
-    );
-
-  return (
-    <aside className="panel inventory-panel" aria-labelledby="inventoryTitle">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">Portfolio</p>
-          <h2 id="inventoryTitle">{t(locale, "portfolio")}</h2>
-        </div>
-        <span className="pill">
-          {entries.length} {t(locale, "typesUnit")}
-        </span>
+  return <aside className="panel inventory-panel" aria-labelledby="inventoryTitle">
+    <div className="panel-heading"><div><p className="eyebrow">Portfolio</p><h2 id="inventoryTitle">{t(locale, "portfolio")}</h2></div><span className="pill">{positions.length} {t(locale, "typesUnit")}</span></div>
+    <div className="money-stack">
+      <div className="metric primary"><span className="net-worth-label"><b>{t(locale, "netWorth")}</b><em>{t(locale, "netWorthFormula")}</em></span><strong>{formatDecimalCurrency(account?.netWorth ?? "0")}</strong></div>
+      <div className="metric-grid metric-led-list">
+        <div className="metric metric-led"><span>{t(locale, "cashBalance")}</span><strong>{formatDecimalCurrency(account?.cash ?? "0")}</strong></div>
+        <div className="metric metric-led"><span>{t(locale, "assetBalance")}</span><strong>{formatDecimalCurrency(account?.holdingsValue ?? "0")}</strong></div>
+        <div className={`metric metric-led pnl-metric ${numericTone(account?.pnl ?? "0")}`}><span>{t(locale, "totalPnl")}</span><strong>{formatDecimalCurrency(account?.pnl ?? "0")}</strong></div>
       </div>
-
-      <div className="money-stack">
-        <div className="metric primary">
-          <span className="net-worth-label">
-            <b>{t(locale, "netWorth")}</b>
-            <em>{t(locale, "netWorthFormula")}</em>
-          </span>
-          <strong>{formatCurrency(netWorth)}</strong>
-        </div>
-        <div className="metric-grid metric-led-list">
-          <div className="metric metric-led">
-            <span>{t(locale, "cashBalance")}</span>
-            <strong>{formatCurrency(cash)}</strong>
-          </div>
-          <div className="metric metric-led">
-            <span>{t(locale, "assetBalance")}</span>
-            <strong>{formatCurrency(assetBalance, assetBalance >= 1_000_000_000)}</strong>
-          </div>
-          <div className={`metric metric-led pnl-metric ${pnlTone}`}>
-            <span>{t(locale, "totalPnl")}</span>
-            <strong>{formatCurrency(pnl, Math.abs(pnl) >= 1_000_000_000)}</strong>
-          </div>
-        </div>
-      </div>
-
-      <div className="progress-wrap" aria-label={t(locale, "returnProgress")}>
-        <div className="progress-label">
-          <span>{t(locale, "returnRate")}</span>
-          <strong>{`${(returnRatio * 100).toFixed(2)}%`}</strong>
-        </div>
-        <div className="progress-track">
-          <div
-            className={`progress-fill${pnl < 0 ? " loss" : ""}`}
-            style={{ width: `${Math.min(100, Math.max(0, 50 + returnRatio * 100))}%` }}
-          />
-        </div>
-      </div>
-
-      {displayedFx.length > 0 && (
-        <div className="exchange-panel" aria-labelledby="exchangeTitle">
-          <div className="exchange-heading">
-            <strong id="exchangeTitle">{t(locale, "exchangeRates")}</strong>
-            <span>{t(locale, "exchangeDaily")}</span>
-          </div>
-          <div className="exchange-list">
-            {displayedFx.map(([currency, label]) => {
-              const rate = state.fxRates[currency] || FALLBACK_FX[currency];
-              return (
-                <div className="exchange-row" key={currency}>
-                  <span>
-                    <b>{locale === "en" ? label.en : label.zh}</b>
-                    <em>{currency}/USD</em>
-                  </span>
-                  <strong>{formatFxRate(currency, rate)}</strong>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      <div className="status-card">
-        <span
-          className="status-dot"
-          aria-hidden="true"
-          style={{ background: status.color, boxShadow: `0 0 0 4px ${status.color}22` }}
-        />
-        <div>
-          <strong>{status.title}</strong>
-          <p>{status.text}</p>
-        </div>
-      </div>
-
-      <div className="inventory-list" aria-live="polite">
-        {entries.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon" aria-hidden="true">
-              ⌁
-            </div>
-            <strong>{t(locale, "emptyTitle")}</strong>
-            <p>{t(locale, "emptyText")}</p>
-          </div>
-        ) : (
-          <div className="inventory-table">
-            <div className="inventory-table-head" aria-hidden="true">
-              <span>{t(locale, "positionAsset")}</span>
-              <span>{t(locale, "positionQty")}</span>
-              <span>{t(locale, "positionValue")}</span>
-              <span>{t(locale, "positionPnl")}</span>
-              <span>{t(locale, "positionReturn")}</span>
-            </div>
-            {entries.map(({ product, position }) => {
-              const quantity = getPositionQuantity(position);
-              const cost = getPositionCost(state, position, product);
-              const total = getProductPrice(state, product) * quantity;
-              const rowPnl = total - cost;
-              const pnlRatio = cost > 0 ? rowPnl / cost : 0;
-              const tone = rowPnl > 0 ? "positive" : rowPnl < 0 ? "negative" : "";
-              const selected = focusedProductId === product.id;
-              return (
-                <button
-                  key={product.id}
-                  className={`inventory-item${selected ? " is-focused" : ""}`}
-                  type="button"
-                  style={{ ["--accent" as string]: product.accent }}
-                  onClick={() => actions.focusProduct(product.id)}
-                >
-                  <span className="position-asset">
-                    <span className="inventory-name">
-                      <strong>{getProductName(product, locale)}</strong>
-                      <span>{product.ticker || product.id}</span>
-                    </span>
-                  </span>
-                  <span className="position-cell strong">{formatNumber(quantity, locale)}</span>
-                  <span className="position-cell strong">
-                    {formatCurrency(total, total >= 1_000_000_000)}
-                  </span>
-                  <span className={`position-cell ${tone}`}>
-                    {formatCurrency(rowPnl, Math.abs(rowPnl) >= 1_000_000_000)}
-                  </span>
-                  <span className={`position-cell ${tone}`}>{formatPercentValue(pnlRatio)}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </aside>
-  );
+    </div>
+    <div className="status-card"><span className="status-dot" aria-hidden="true" />
+      <div><strong>{t(locale, "lossRankTitle")}</strong><p>{leaderboardError ? t(locale, "leaderboardUnavailable") : rank ? `#${rank.rank} / ${rank.total} · ${formatDecimalCurrency(rank.pnl)}` : t(locale, "leaderboardLoading")}</p></div>
+    </div>
+    <div className="inventory-list" aria-live="polite">
+      {positions.length === 0 ? <div className="empty-state"><div className="empty-icon" aria-hidden="true">⌁</div><strong>{t(locale, "emptyTitle")}</strong><p>{t(locale, "emptyText")}</p></div> :
+        <div className="inventory-table">
+          <div className="inventory-table-head" aria-hidden="true"><span>{t(locale, "positionAsset")}</span><span>{t(locale, "positionQty")}</span><span>{t(locale, "positionValue")}</span><span>{t(locale, "positionPnl")}</span><span>{t(locale, "positionReturn")}</span></div>
+          {positions.map((position) => { const asset = assets.get(position.assetId); const visual = productById.get(position.assetId); const pnl = position.unrealizedPnl; return <button key={position.assetId} className={`inventory-item${focusedProductId === position.assetId ? " is-focused" : ""}`} type="button" style={{ ["--accent" as string]: visual?.accent ?? "#536078" }} onClick={() => actions.focusProduct(position.assetId)}>
+            <span className="position-asset"><span className="inventory-name"><strong>{locale === "en" ? asset?.nameEn || asset?.name : asset?.name}</strong><span>{asset?.ticker || position.assetId}</span></span></span>
+            <span className="position-cell strong">{formatDecimalNumber(position.quantity, locale)}</span>
+            <span className="position-cell strong">{position.marketValue ? formatDecimalCurrency(position.marketValue) : t(locale, "priceUnavailable")}</span>
+            <span className={`position-cell ${pnl ? numericTone(pnl) : ""}`}>{pnl ? formatDecimalCurrency(pnl) : t(locale, "priceUnavailable")}</span>
+            <span className="position-cell">—</span>
+          </button>; })}
+        </div>}
+    </div>
+  </aside>;
 }

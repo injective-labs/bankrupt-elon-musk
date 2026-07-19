@@ -70,13 +70,15 @@ export interface GameActions {
   toggleSound(): void; toggleLocale(): void; setCategory(category: string): void; setSubcategory(subcategory: string): void; setSearch(search: string): void; setSort(sort: SortMode): void; focusProduct(id: string): void;
 }
 
-interface GameContextValue { authStatus: AuthStatus; account: AccountProjection | null; state: GameState; actions: GameActions; pendingCommand: PendingCommand | null; lastError: string | null; focusedProductId: string | null; flashTick: number; ready: boolean }
+interface GameContextValue { authStatus: AuthStatus; account: AccountProjection | null; leaderboard: LeaderboardSnapshot | null; leaderboardError: boolean; state: GameState; actions: GameActions; pendingCommand: PendingCommand | null; lastError: string | null; focusedProductId: string | null; flashTick: number; ready: boolean }
 const GameContext = createContext<GameContextValue | null>(null);
 export function useGame() { const value = useContext(GameContext); if (!value) throw new Error("useGame must be used within GameProvider"); return value; }
 
 export function GameProvider({ children, api = defaultApi }: { children: ReactNode; api?: GameApi }) {
   const [authStatus, setAuthStatus] = useState<AuthStatus>("loading");
   const [account, setAccount] = useState<AccountProjection | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardSnapshot | null>(null);
+  const [leaderboardError, setLeaderboardError] = useState(false);
   const [preferences, setPreferences] = useState(initialPreferences);
   const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -172,5 +174,12 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   }), [api, command, explicitQuantity, fail, loadGame, trade]);
 
   const state = useMemo(() => projectionState(account, preferences), [account, preferences]);
-  return <GameContext.Provider value={{ authStatus, account, state, actions, pendingCommand, lastError, focusedProductId, flashTick: 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;
+  useEffect(() => {
+    if (authStatus !== "authenticated") { setLeaderboard(null); setLeaderboardError(false); return; }
+    let active = true;
+    setLeaderboardError(false);
+    void Promise.resolve(api.getLeaderboard()).then((value) => { if (active && value) setLeaderboard(value); }).catch(() => { if (active) { setLeaderboard(null); setLeaderboardError(true); } });
+    return () => { active = false; };
+  }, [api, authStatus, account?.updatedAt]);
+  return <GameContext.Provider value={{ authStatus, account, leaderboard, leaderboardError, state, actions, pendingCommand, lastError, focusedProductId, flashTick: 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;
 }

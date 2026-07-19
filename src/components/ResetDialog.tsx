@@ -9,11 +9,12 @@ interface ResetDialogProps {
   locale: Locale;
   onCancel: () => void;
   onConfirm: () => void;
+  disabled?: boolean;
 }
 
 // Confirmation modal for the (temporary) reset action. Kept self-contained so the
 // whole reset feature can be removed in one step later.
-export function ResetDialog({ open, locale, onCancel, onConfirm }: ResetDialogProps) {
+export function ResetDialog({ open, locale, onCancel, onConfirm, disabled = false }: ResetDialogProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -46,8 +47,8 @@ export function ResetDialog({ open, locale, onCancel, onConfirm }: ResetDialogPr
           <button className="reset-dialog-button secondary" type="button" onClick={onCancel}>
             {t(locale, "resetDialogNo")}
           </button>
-          <button className="reset-dialog-button danger" type="button" onClick={onConfirm}>
-            {t(locale, "resetDialogYes")}
+          <button className="reset-dialog-button danger" type="button" disabled={disabled} onClick={onConfirm}>
+            {disabled ? t(locale, "error.RESET_DISABLED") : t(locale, "resetDialogYes")}
           </button>
         </div>
       </div>

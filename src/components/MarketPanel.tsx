@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { GameState, Product, SortMode } from "@/types";
 import type { TradeSide } from "@/game/engine";
 import { useGame } from "@/state/GameProvider";
+import { productById } from "@/data/expandedAssets";
 import { t, labelFrom } from "@/i18n";
 import { CATEGORY_LABELS, SUBCATEGORY_LABELS } from "@/data/categoryLabels";
 import {
@@ -14,7 +15,6 @@ import {
   ALL_SUBCATEGORY,
 } from "@/data/categories";
 import {
-  getBalance,
   getProductPrice,
   getProductCurrency,
   getPositionQuantity,
@@ -52,12 +52,25 @@ function getVisibleProducts(state: GameState): Product[] {
 }
 
 export function MarketPanel() {
-  const { state, actions, focusedProductId } = useGame();
+  const { state, account, actions, focusedProductId } = useGame();
   const locale = state.locale;
 
-  const visible = useMemo(() => getVisibleProducts(state), [state]);
+  const serverProducts = useMemo(() => (account?.assets ?? []).filter((asset) => asset.enabled).map((asset) => {
+    const presentation = productById.get(asset.id);
+    return {
+      ...(presentation ?? { id: asset.id, price: 0, icon: "", accent: "#536078", description: "", descriptionEn: "" }),
+      id: asset.id, name: asset.name, nameEn: asset.nameEn ?? undefined, assetClass: asset.category,
+      category: presentation?.category ?? "金融", subCategory: asset.subCategory ?? undefined,
+      ticker: asset.ticker, currency: asset.currency, unit: asset.unit, unitEn: asset.unitEn ?? undefined,
+    } as Product;
+  }), [account?.assets]);
+  const projectionState = useMemo(() => ({ ...state, prices: Object.fromEntries((account?.assets ?? []).filter((asset) => asset.usdPrice !== null).map((asset) => [asset.id, { nativePrice: Number(asset.usdPrice), usdPrice: Number(asset.usdPrice), currency: asset.currency, closeDate: asset.marketDate ?? "", source: "server", updatedAt: account?.updatedAt ?? "" }])) }), [account, state]);
+  const visible = useMemo(() => {
+    const allowed = new Set(serverProducts.map((product) => product.id));
+    return getVisibleProducts(projectionState).filter((product) => allowed.has(product.id)).map((product) => serverProducts.find((item) => item.id === product.id) ?? product);
+  }, [projectionState, serverProducts]);
   const subcategories = getSubcategoriesForCategory(state.selectedCategory);
-  const balance = getBalance(state);
+  const balance = Number(account?.cash ?? 0);
 
   // Only one trade ticket open at a time (mirrors the prototype's activeTrade).
   const [activeTrade, setActiveTrade] = useState<{ id: string; side: TradeSide } | null>(null);
@@ -136,8 +149,9 @@ export function MarketPanel() {
 
       <div className="product-grid">
         {visible.map((product) => {
-          const price = getProductPrice(state, product);
-          const owned = getPositionQuantity(state.inventory[product.id]);
+          const asset = account?.assets.find((item) => item.id === product.id);
+          const price = Number(asset?.usdPrice ?? 0);
+          const owned = Number(account?.positions.find((item) => item.assetId === product.id)?.quantity ?? 0);
           const margin = price / state.leverage;
           return (
             <ProductCard
@@ -146,16 +160,14 @@ export function MarketPanel() {
               price={price}
               owned={owned}
               overdraft={margin > balance}
-              currency={getProductCurrency(state, product)}
-              live={Boolean(state.prices?.[product.id])}
+              currency={asset?.currency ?? getProductCurrency(state, product)}
+              live={asset?.quoteStatus === "ACTIVE"}
               selected={focusedProductId === product.id}
               liquidated={state.liquidated}
               locale={locale}
               activeSide={activeTrade?.id === product.id ? activeTrade.side : null}
               onOpenTicket={openTicket}
               onCloseTicket={closeTicket}
-              onMax={actions.buyMax}
-              onSellAll={actions.sellAll}
             />
           );
         })}

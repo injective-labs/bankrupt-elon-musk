@@ -9,6 +9,25 @@ export function formatCurrency(value: number, compact = false): string {
   }).format(value);
 }
 
+/** Formats an API decimal without first coercing it through IEEE-754. */
+export function formatDecimalCurrency(value: string, fractionDigits = 2): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value);
+  if (!match) return "$--";
+  const [, sign, rawInteger, rawFraction = ""] = match;
+  const integer = rawInteger.replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const fraction = rawFraction.padEnd(fractionDigits, "0").slice(0, fractionDigits);
+  return `${sign ? "-$" : "$"}${integer}${fractionDigits ? `.${fraction}` : ""}`;
+}
+
+export function formatDecimalNumber(value: string, locale: Locale, maximumFractionDigits = 8): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value);
+  if (!match) return "--";
+  const [, sign, integer, rawFraction = ""] = match;
+  const grouped = integer.replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, locale === "zh" ? "," : ",");
+  const fraction = rawFraction.slice(0, maximumFractionDigits).replace(/0+$/, "");
+  return `${sign}${grouped}${fraction ? `.${fraction}` : ""}`;
+}
+
 export function formatNumber(value: number, locale: Locale): string {
   return new Intl.NumberFormat(locale === "en" ? "en-US" : "zh-CN", {
     maximumFractionDigits: 0,

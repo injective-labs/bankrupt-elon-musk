@@ -23,9 +23,9 @@ function GameShell() {
     return <main className="app-shell" data-auth-state={authStatus}>
       <section className="panel" aria-busy={authStatus === "loading"}>
         <h1>{t(state.locale, "brandTitle")}</h1>
-        {authStatus === "loading" ? <p>Loading…</p> : <ConnectButton />}
-        {authStatus === "expired" && <p role="alert">Session expired. Please sign in again.</p>}
-        {lastError && <p role="alert">{lastError}</p>}
+        {authStatus === "loading" ? <p>{t(state.locale, "accountSyncing")}</p> : <ConnectButton />}
+        {authStatus === "expired" && <p role="alert">{t(state.locale, "error.UNAUTHORIZED")}</p>}
+        {lastError && <p role="alert">{t(state.locale, `error.${lastError}`)}</p>}
       </section>
     </main>;
   }
