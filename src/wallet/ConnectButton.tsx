@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useInjPass } from "./InjPassProvider";
 import { useGame } from "@/state/GameProvider";
-import { useCloudSync } from "@/state/CloudSyncProvider";
 
 function truncate(address: string): string {
   if (!address) return "";
@@ -16,10 +15,8 @@ const LABELS = {
   sign: { zh: "签名测试", en: "Sign test" },
   signed: { zh: "签名成功", en: "Signed" },
   disconnect: { zh: "断开", en: "Disconnect" },
-  cloudSync: { zh: "☁ 同步存档", en: "☁ Sync save" },
-  cloudSyncing: { zh: "☁ 同步中…", en: "☁ Syncing…" },
-  cloudSynced: { zh: "☁ 已同步 ✓", en: "☁ Synced ✓" },
-  cloudError: { zh: "☁ 同步失败 · 重试", en: "☁ Sync failed · retry" },
+  authenticated: { zh: "已认证", en: "Authenticated" },
+  loginRequired: { zh: "需要签名认证", en: "Signature required" },
   popupBlocked: {
     zh: "弹窗被拦截，请允许本站弹窗后重试。",
     en: "Popup blocked — allow popups for this site and retry.",
@@ -28,20 +25,10 @@ const LABELS = {
 
 export function ConnectButton() {
   const { status, wallet, error, connect, disconnect, signMessage } = useInjPass();
-  const { state } = useGame();
-  const { status: cloudStatus } = useCloudSync();
+  const { state, authStatus, actions, pendingCommand } = useGame();
   const locale = state.locale;
 
-  const cloudLabelKey =
-    cloudStatus === "syncing"
-      ? "cloudSyncing"
-      : cloudStatus === "synced"
-        ? "cloudSynced"
-        : cloudStatus === "error"
-          ? "cloudError"
-          : "cloudSync";
   const [open, setOpen] = useState(false);
-  const [signedNote, setSignedNote] = useState<string | null>(null);
 
   const label = (key: keyof typeof LABELS) => LABELS[key][locale];
 
@@ -63,24 +50,28 @@ export function ConnectButton() {
         {open && (
           <div className="wallet-menu" role="menu">
             <div className="wallet-status" role="status">
-              {LABELS[cloudLabelKey][locale]}
+              {label(authStatus === "authenticated" ? "authenticated" : "loginRequired")}
             </div>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={async () => {
-                const sig = await signMessage("INJ Pass × Bankrupt Elon Musk");
-                if (sig) setSignedNote(`${label("signed")} (${sig.length}B)`);
-                setTimeout(() => setSignedNote(null), 2400);
-              }}
-            >
-              {signedNote || label("sign")}
-            </button>
+            {authStatus !== "authenticated" && (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={pendingCommand === "login"}
+                onClick={() => void actions.login(wallet.address, wallet.walletName ?? null, async (message) => {
+                  const signature = await signMessage(message);
+                  if (!signature) throw new Error("SIGNATURE_REQUIRED");
+                  return signature;
+                })}
+              >
+                {label("sign")}
+              </button>
+            )}
             <button
               type="button"
               role="menuitem"
               className="danger"
               onClick={() => {
+                void actions.logout();
                 disconnect();
                 setOpen(false);
               }}
@@ -98,12 +89,20 @@ export function ConnectButton() {
       <button
         className="icon-button wallet-connect"
         type="button"
-        disabled={status === "connecting"}
-        onClick={() => void connect()}
+        disabled={status === "connecting" || pendingCommand === "login"}
+        onClick={() => void (async () => {
+          const connected = await connect();
+          if (!connected) return;
+          await actions.login(connected.address, connected.walletName ?? null, async (message) => {
+            const signature = await connected.signer.signMessage(message);
+            if (!signature) throw new Error("SIGNATURE_REQUIRED");
+            return signature;
+          });
+        })()}
         title={label("connect")}
       >
         <span aria-hidden="true">🔗</span>
-        <span>{status === "connecting" ? label("connecting") : label("connect")}</span>
+        <span>{status === "connecting" || pendingCommand === "login" ? label("connecting") : label("connect")}</span>
       </button>
       {error && (
         <div className="wallet-error">

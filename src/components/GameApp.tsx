@@ -2,8 +2,8 @@
 
 import { useEffect } from "react";
 import { GameProvider, useGame } from "@/state/GameProvider";
-import { CloudSyncProvider } from "@/state/CloudSyncProvider";
 import { InjPassProvider } from "@/wallet/InjPassProvider";
+import { ConnectButton } from "@/wallet/ConnectButton";
 import { t } from "@/i18n";
 import { TopBar } from "./TopBar";
 import { FxTicker } from "./FxTicker";
@@ -12,12 +12,23 @@ import { PortfolioPanel } from "./PortfolioPanel";
 import { MarketPanel } from "./MarketPanel";
 
 function GameShell() {
-  const { state, ready } = useGame();
+  const { state, authStatus, lastError } = useGame();
 
   useEffect(() => {
     document.documentElement.lang = state.locale === "en" ? "en" : "zh-CN";
     document.title = t(state.locale, "brandTitle");
   }, [state.locale]);
+
+  if (authStatus !== "authenticated") {
+    return <main className="app-shell" data-auth-state={authStatus}>
+      <section className="panel" aria-busy={authStatus === "loading"}>
+        <h1>{t(state.locale, "brandTitle")}</h1>
+        {authStatus === "loading" ? <p>Loading…</p> : <ConnectButton />}
+        {authStatus === "expired" && <p role="alert">Session expired. Please sign in again.</p>}
+        {lastError && <p role="alert">{lastError}</p>}
+      </section>
+    </main>;
+  }
 
   return (
     <div className="app-shell">
@@ -28,7 +39,6 @@ function GameShell() {
         <PortfolioPanel />
         <MarketPanel />
       </main>
-      {!ready && <span hidden aria-hidden="true" data-loading="true" />}
     </div>
   );
 }
@@ -37,9 +47,7 @@ export function GameApp() {
   return (
     <InjPassProvider>
       <GameProvider>
-        <CloudSyncProvider>
-          <GameShell />
-        </CloudSyncProvider>
+        <GameShell />
       </GameProvider>
     </InjPassProvider>
   );

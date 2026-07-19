@@ -1,71 +1,63 @@
-// Same-origin client for the built-in game backend (app/api/*).
-import type { GameState, LeaderboardSnapshot } from "@/types";
+import type { AccountProjection, ApiErrorBody, LeaderboardSnapshot, TransactionView } from "@/types";
 
-export interface SaveMetrics {
-  netWorth: number;
-  pnl: number;
-  holdingsValue: number;
+export interface SessionView { walletAddress: string; walletName: string | null }
+export interface TradeInput { assetId: string; side: "BUY" | "SELL"; quantity: string; idempotencyKey: string }
+export interface TransactionPage { rows: TransactionView[]; nextCursor: string | null }
+export type MessageSigner = (message: string) => Promise<Uint8Array>;
+
+export class GameApiError extends Error {
+  constructor(public status: number, public code: string, message: string) {
+    super(message);
+    this.name = "GameApiError";
+  }
 }
 
-function toHexSignature(sig: Uint8Array): `0x${string}` {
-  return ("0x" +
-    Array.from(sig)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")) as `0x${string}`;
+function toHexSignature(signature: Uint8Array): `0x${string}` {
+  return `0x${Array.from(signature, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
+
+async function response<T>(request: Promise<Response>): Promise<T> {
+  const res = await request;
+  const body = await res.json().catch(() => null) as ApiErrorBody | T | null;
+  if (!res.ok) {
+    const error = body && typeof body === "object" && "error" in body ? body.error : null;
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : res.status === 401 ? "UNAUTHORIZED" : `HTTP_${res.status}`;
+    const message = typeof error === "string" ? error : error && typeof error === "object" && "message" in error ? String(error.message) : code;
+    throw new GameApiError(res.status, code, message);
+  }
+  return body as T;
+}
+
+const json = (method: string, body?: unknown): RequestInit => ({
+  method,
+  credentials: "same-origin",
+  headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
+
+export async function getSession(): Promise<SessionView | null> {
+  try { return await response<SessionView>(fetch("/api/auth/session", json("GET"))); }
+  catch (error) { if (error instanceof GameApiError && error.status === 401) return null; throw error; }
+}
+
+export async function loginWithSignature(address: string, walletName: string | null, signMessage: MessageSigner): Promise<SessionView> {
+  const challenge = await response<{ nonce: string; message: string }>(fetch("/api/auth/nonce", json("POST", { address })));
+  const signature = toHexSignature(await signMessage(challenge.message));
+  return response<SessionView>(fetch("/api/auth/verify", json("POST", { address, walletName, signature })));
+}
+
+export async function logout(): Promise<void> {
+  await response<{ ok: true }>(fetch("/api/auth/logout", json("POST")));
+}
+
+export const getGame = (): Promise<AccountProjection> => response(fetch("/api/game", json("GET")));
+export const submitTrade = (command: TradeInput): Promise<AccountProjection> => response(fetch("/api/trades", json("POST", command)));
+export const resetGame = (idempotencyKey: string): Promise<AccountProjection> => response(fetch("/api/game/reset", json("POST", { idempotencyKey })));
+export const getTransactions = (cursor?: string, limit = 50): Promise<TransactionPage> => {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return response(fetch(`/api/trades?${params}`, json("GET")));
+};
+export const getLeaderboard = (): Promise<LeaderboardSnapshot> => response(fetch("/api/leaderboard", json("GET")));
 
 export { toHexSignature };
-
-export async function requestNonce(address: string): Promise<{ nonce: string; message: string }> {
-  const res = await fetch("/api/auth/nonce", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address }),
-  });
-  if (!res.ok) throw new Error(`nonce failed: ${res.status}`);
-  return res.json();
-}
-
-export async function verifySignature(
-  address: string,
-  signature: string,
-): Promise<string | null> {
-  const res = await fetch("/api/auth/verify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address, signature }),
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as { token?: string };
-  return data.token ?? null;
-}
-
-// Persistence is keyed purely by wallet address (anonymous device address, or the
-// INJ Pass address once linked) — no signature/token step required.
-export async function getCloudState(wallet: string): Promise<GameState | null> {
-  const res = await fetch(`/api/state?wallet=${encodeURIComponent(wallet)}`);
-  if (!res.ok) return null;
-  const data = (await res.json()) as { state?: GameState | null };
-  return data.state ?? null;
-}
-
-export async function putCloudState(
-  wallet: string,
-  state: GameState,
-  metrics: SaveMetrics,
-  walletName?: string | null,
-): Promise<boolean> {
-  const res = await fetch("/api/state", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ walletAddress: wallet, state, metrics, walletName }),
-  });
-  return res.ok;
-}
-
-export async function getLeaderboard(wallet?: string | null): Promise<LeaderboardSnapshot | null> {
-  const qs = wallet ? `?wallet=${encodeURIComponent(wallet)}` : "";
-  const res = await fetch(`/api/leaderboard${qs}`);
-  if (!res.ok) return null;
-  return res.json();
-}

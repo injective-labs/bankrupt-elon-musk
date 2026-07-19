@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { useGame } from "@/state/GameProvider";
-import { useCloudSync } from "@/state/CloudSyncProvider";
 import { t } from "@/i18n";
 import { STARTING_BALANCE, FX_DISPLAY_ORDER, FALLBACK_FX } from "@/data/constants";
 import { productById } from "@/data/expandedAssets";
@@ -23,7 +22,6 @@ import type { Product, Position } from "@/types";
 
 export function PortfolioPanel() {
   const { state, actions, focusedProductId } = useGame();
-  const { leaderboard } = useCloudSync();
   const locale = state.locale;
 
   const cash = getBalance(state);
@@ -33,31 +31,7 @@ export function PortfolioPanel() {
   const returnRatio = pnl / STARTING_BALANCE;
   const pnlTone = pnl > 0 ? "positive" : pnl < 0 ? "negative" : "neutral";
 
-  // Real leaderboard rank when connected; otherwise the simulated ranking.
-  const you = leaderboard?.you;
-  const leaderboardPnl = you ? Number(you.pnl) : 0;
-  const status = you
-    ? {
-        title: t(locale, "lossRankTitle"),
-        text:
-          locale === "en"
-            ? `#${formatNumber(you.rank, locale)} / ${formatNumber(you.total, locale)} real players. ${
-                leaderboardPnl < 0
-                  ? `Loss ${formatCurrency(Math.abs(leaderboardPnl), true)}`
-                  : leaderboardPnl > 0
-                    ? `Profit ${formatCurrency(leaderboardPnl, true)}`
-                    : "Flat book"
-              }.`
-            : `#${formatNumber(you.rank, locale)} / ${formatNumber(you.total, locale)} 真实玩家。${
-                leaderboardPnl < 0
-                  ? `亏损 ${formatCurrency(Math.abs(leaderboardPnl), true)}`
-                  : leaderboardPnl > 0
-                    ? `盈利 ${formatCurrency(leaderboardPnl, true)}`
-                    : "账户打平"
-              }。`,
-        color: leaderboardPnl < 0 ? "#c94d3f" : leaderboardPnl > 0 ? "#2d7b46" : "#b88921",
-      }
-    : getLossRanking(state);
+  const status = getLossRanking(state);
 
   // FX rates for the currencies actually used by tradeable assets (non-USD).
   const displayedFx = useMemo(() => {

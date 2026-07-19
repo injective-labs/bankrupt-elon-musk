@@ -16,7 +16,7 @@ interface InjPassContextValue {
   status: WalletStatus;
   wallet: ConnectedWallet | null;
   error: string | null;
-  connect: () => Promise<void>;
+  connect: () => Promise<ConnectedWallet | null>;
   disconnect: () => void;
   signMessage: (message: string) => Promise<Uint8Array | null>;
 }
@@ -61,10 +61,12 @@ export function InjPassProvider({ children }: { children: ReactNode }) {
       const connected = await getConnector().connect();
       setWallet(connected);
       setStatus("connected");
+      return connected;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
       setStatus("idle");
+      return null;
     }
   }, [getConnector]);
 
