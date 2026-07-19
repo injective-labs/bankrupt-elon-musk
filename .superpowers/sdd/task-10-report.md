@@ -19,7 +19,7 @@ Complete. Browser-owned pricing/state paths and the legacy finance mutation mode
 
 ## Verification
 
-- `pnpm test`: 26 files passed, 2 skipped; 174 tests passed, 5 skipped.
+- `pnpm test`: 27 files passed, 2 skipped; 175 tests passed, 5 skipped.
 - `pnpm typecheck`: passed.
 - `pnpm build`: passed; generated route manifest contains only the server-authoritative API routes and excludes `/api/chart` and `/api/state`.
 - `rg -n "leverage|debt|accruedInterest|liquidated|borrowMoney|repayMoney|settleOneDayInterest|accrueInterest|checkLiquidation|/api/state|localStorage" src app`: no matches.
@@ -28,3 +28,10 @@ Complete. Browser-owned pricing/state paths and the legacy finance mutation mode
 ## Notes
 
 The build emits existing advisory warnings for deprecated Prisma `package.json#prisma` configuration and stale `baseline-browser-mapping` data; neither affects verification.
+
+## P2 Architecture Guard Follow-up
+
+- Added a reusable active-source scanner covering `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, `.cts`, and `.css` recursively, without exclusions.
+- Added a temporary-directory regression test proving forbidden content in both `.js` and `.mjs` files is detected without placing fixtures in the active application tree.
+- TDD RED: the focused test failed because the scanner module did not yet exist.
+- TDD GREEN: both the scanner regression and application architecture guard passed (2 tests).
