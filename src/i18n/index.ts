@@ -7,6 +7,11 @@ export function t(locale: Locale, key: string): string {
   return I18N[locale]?.[key] || I18N.zh[key] || key;
 }
 
+export function errorText(locale: Locale, code: string): string {
+  const key = `error.${code}`;
+  return I18N[locale]?.[key] || I18N.zh[key] || I18N[locale].errorGeneric;
+}
+
 export function labelFrom(
   map: Record<string, BilingualLabel>,
   key: string,

@@ -39,7 +39,7 @@ function MarketClock() {
 }
 
 export function TopBar() {
-  const { state, account, actions, pendingCommand } = useGame();
+  const { state, account, tradingLocked, actions, pendingCommand } = useGame();
   const locale = state.locale;
   const [resetOpen, setResetOpen] = useState(false);
 
@@ -61,7 +61,7 @@ export function TopBar() {
           className="icon-button danger"
           type="button"
           title={t(locale, "reset")}
-          disabled={!account || account.settlementLocked || pendingCommand !== null}
+          disabled={!account || !account.resetEnabled || tradingLocked || pendingCommand !== null}
           onClick={() => setResetOpen(true)}
         >
           <span aria-hidden="true">↺</span>
@@ -93,7 +93,7 @@ export function TopBar() {
       <ResetDialog
         open={resetOpen}
         locale={locale}
-        disabled={!account || account.settlementLocked || pendingCommand !== null}
+        disabled={!account || !account.resetEnabled || tradingLocked || pendingCommand !== null}
         onCancel={() => setResetOpen(false)}
         onConfirm={() => {
           actions.reset();

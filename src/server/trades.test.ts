@@ -34,7 +34,7 @@ describe("executeTrade", () => {
     mocks.transactionCreate.mockResolvedValue({ id: 1n });
     mocks.player.mockResolvedValue({ cash: d("100"), updatedAt: new Date() });
     mocks.asset.mockResolvedValue({ id: "stock", enabled: true, quoteMultiplier: d("1"), quote: { nativePrice: d("5"), currency: "USD", fxRateToUsd: d("1"), usdPrice: d("5"), marketDate: new Date("2026-07-18"), status: "ACTIVE" } });
-    mocks.projection.mockResolvedValue({ walletAddress: wallet, cash: "90", holdingsValue: "10", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "2026-07-19T12:00:00.000Z" });
+    mocks.projection.mockResolvedValue({ walletAddress: wallet, cash: "90", holdingsValue: "10", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T12:00:00.000Z" });
   });
 
   it("buys using exact Decimal accounting and accumulates weighted total cost basis", async () => {
@@ -82,7 +82,7 @@ describe("executeTrade", () => {
   });
 
   it("returns idempotently without a second mutation", async () => {
-    const stable = { walletAddress: wallet, cash: "77", holdingsValue: "23", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "2026-07-19T10:00:00.000Z" };
+    const stable = { walletAddress: wallet, cash: "77", holdingsValue: "23", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T10:00:00.000Z" };
     mocks.transactionFind.mockResolvedValue({ id: 1n, commandSnapshot: command, resultSnapshot: stable });
     await expect(executeTrade(wallet, command)).resolves.toEqual(stable);
     expect(mocks.playerUpdate).not.toHaveBeenCalled(); expect(mocks.projection).not.toHaveBeenCalled();
@@ -115,7 +115,7 @@ describe("executeTrade", () => {
   });
 
   it("replays only a P2002 on the trade idempotency unique key", async () => {
-    const stable = { walletAddress: wallet, cash: "90", holdingsValue: "10", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "2026-07-19T12:00:00.000Z" };
+    const stable = { walletAddress: wallet, cash: "90", holdingsValue: "10", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T12:00:00.000Z" };
     mocks.transaction.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002", meta: { target: ["walletAddress", "idempotencyKey"] } }));
     mocks.replayFind.mockResolvedValue({ commandSnapshot: command, resultSnapshot: stable });
     await expect(executeTrade(wallet, command)).resolves.toEqual(stable);

@@ -66,7 +66,7 @@ function account(value: unknown): AccountProjection {
   if (!value || typeof value !== "object") return invalidResponse("Account response is missing");
   const record = value as Record<string, unknown>;
   const decimals = ["cash", "holdingsValue", "netWorth", "pnl"];
-  if (typeof record.walletAddress !== "string" || !(record.walletName === undefined || stringOrNull(record.walletName)) || decimals.some((key) => !decimal(record[key])) || !Array.isArray(record.positions) || !record.positions.every(validPosition) || !Array.isArray(record.assets) || !record.assets.every(validAsset) || !Array.isArray(record.recentTransactions) || !record.recentTransactions.every(validTransaction) || !stringOrNull(record.marketAsOf) || typeof record.updatedAt !== "string" || typeof record.settlementLocked !== "boolean") {
+  if (typeof record.walletAddress !== "string" || !(record.walletName === undefined || stringOrNull(record.walletName)) || decimals.some((key) => !decimal(record[key])) || !Array.isArray(record.positions) || !record.positions.every(validPosition) || !Array.isArray(record.assets) || !record.assets.every(validAsset) || !Array.isArray(record.recentTransactions) || !record.recentTransactions.every(validTransaction) || !stringOrNull(record.marketAsOf) || typeof record.updatedAt !== "string" || typeof record.settlementLocked !== "boolean" || typeof record.resetEnabled !== "boolean") {
     return invalidResponse("Account response is malformed");
   }
   return value as AccountProjection;

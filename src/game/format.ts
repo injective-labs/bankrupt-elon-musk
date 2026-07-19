@@ -28,6 +28,29 @@ export function formatDecimalNumber(value: string, locale: Locale, maximumFracti
   return `${sign}${grouped}${fraction ? `.${fraction}` : ""}`;
 }
 
+function decimalParts(value: string): { coefficient: bigint; scale: bigint } | null {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(value);
+  if (!match) return null;
+  const fraction = match[2] ?? "";
+  return { coefficient: BigInt(`${match[1]}${fraction}`), scale: 10n ** BigInt(fraction.length) };
+}
+
+export function floorDecimalDivision(dividend: string, divisor: string): string {
+  const left = decimalParts(dividend); const right = decimalParts(divisor);
+  if (!left || !right || right.coefficient === 0n) return "0";
+  return ((left.coefficient * right.scale) / (right.coefficient * left.scale)).toString();
+}
+
+export function integerFraction(value: string, numerator: bigint, denominator: bigint): string {
+  if (!/^(?:0|[1-9]\d*)$/.test(value) || denominator <= 0n) return "0";
+  return (BigInt(value) * numerator / denominator).toString();
+}
+
+export function isPositiveDecimal(value: string): boolean {
+  const parts = decimalParts(value);
+  return Boolean(parts && parts.coefficient > 0n);
+}
+
 export function formatNumber(value: number, locale: Locale): string {
   return new Intl.NumberFormat(locale === "en" ? "en-US" : "zh-CN", {
     maximumFractionDigits: 0,

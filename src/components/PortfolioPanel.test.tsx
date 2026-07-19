@@ -7,7 +7,7 @@ import type { AccountProjection } from "@/types";
 import { GameProvider, useGame, type GameApi } from "@/state/GameProvider";
 import { PortfolioPanel } from "./PortfolioPanel";
 
-const base: AccountProjection = { walletAddress: "0x1", cash: "9007199254740993.12", holdingsValue: "0.88", netWorth: "9007199254740994.00", pnl: "-49999999999.125", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "2026-07-19T00:00:00.000Z" };
+const base: AccountProjection = { walletAddress: "0x1", cash: "9007199254740993.12", holdingsValue: "0.88", netWorth: "9007199254740994.00", pnl: "-49999999999.125", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T00:00:00.000Z" };
 const api = (overrides: Partial<GameApi> = {}): GameApi => ({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), loginWithSignature: vi.fn(), logout: vi.fn(), getGame: vi.fn().mockResolvedValue(base), submitTrade: vi.fn(), resetGame: vi.fn(), getTransactions: vi.fn(), getLeaderboard: vi.fn().mockResolvedValue({ top: [], total: 0, you: null }), ...overrides });
 
 describe("PortfolioPanel authoritative projection", () => {
@@ -34,5 +34,11 @@ describe("PortfolioPanel authoritative projection", () => {
   it("shows an explicit unavailable state when leaderboard loading fails", async () => {
     render(<GameProvider api={api({ getLeaderboard: vi.fn().mockRejectedValue(new Error("down")) })}><PortfolioPanel /></GameProvider>);
     await waitFor(() => expect(screen.getByText(/排行榜暂不可用|Leaderboard unavailable/)).toBeInTheDocument());
+  });
+
+  it("shows empty success rather than a perpetual loading state", async () => {
+    render(<GameProvider api={api()}><PortfolioPanel /></GameProvider>);
+    await waitFor(() => expect(screen.getByText(/暂无排行榜记录|No leaderboard entries/)).toBeInTheDocument());
+    expect(screen.queryByText(/排行榜同步中|Loading leaderboard/)).not.toBeInTheDocument();
   });
 });

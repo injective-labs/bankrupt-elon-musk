@@ -26,7 +26,7 @@ const key = "00000000-0000-4000-8000-000000000071";
 const projection = {
   walletAddress: wallet, walletName: null, cash: "50000000000", holdingsValue: "0",
   netWorth: "50000000000", pnl: "0", positions: [], assets: [], recentTransactions: [],
-  marketAsOf: null, settlementLocked: false, updatedAt: "2026-07-19T12:00:00.000Z",
+  marketAsOf: null, settlementLocked: false, resetEnabled: true, updatedAt: "2026-07-19T12:00:00.000Z",
 };
 const audit = [
   { assetId: "alpha", quantity: "999999999999999999.999999999999", costBasis: "9999999999999999999999.99999999" },

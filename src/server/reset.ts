@@ -82,7 +82,7 @@ function projectionSnapshot(value: unknown, walletAddress: string): AccountProje
     || ![value.cash, value.holdingsValue, value.netWorth, value.pnl].every(isDecimalString)
     || !Array.isArray(value.positions) || !Array.isArray(value.assets) || !Array.isArray(value.recentTransactions)
     || !(value.marketAsOf === null || isDateString(value.marketAsOf))
-    || typeof value.settlementLocked !== "boolean" || !isDateString(value.updatedAt)) {
+    || typeof value.settlementLocked !== "boolean" || typeof value.resetEnabled !== "boolean" || !isDateString(value.updatedAt)) {
     throw new ApiError(500, "INVALID_RESET_SNAPSHOT", "Stored reset result is invalid");
   }
   const validPositions = value.positions.every((item) => isRecord(item) && typeof item.assetId === "string" && isDecimalString(item.quantity) && isDecimalString(item.costBasis) && (item.marketValue === null || isDecimalString(item.marketValue)) && (item.unrealizedPnl === null || isDecimalString(item.unrealizedPnl)));

@@ -24,7 +24,7 @@ function segmentRangeLabel(locale: Locale, type: SegmentType, range: SessionSegm
 }
 
 export function SessionBar() {
-  const { state, account } = useGame();
+  const { state, tradingLocked } = useGame();
   const locale = state.locale;
   const [now, setNow] = useState(() => new Date());
 
@@ -34,7 +34,7 @@ export function SessionBar() {
   }, []);
 
   const session = getTradingSessionState(now);
-  const locked = Boolean(account?.settlementLocked || session.locked);
+  const locked = tradingLocked;
   const segmentTypes: SegmentType[] = ["before", "settlement", "after"];
 
   return (

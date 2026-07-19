@@ -1,12 +1,11 @@
 "use client";
 
-import { memo, useEffect, useState } from "react";
+import { memo, useState } from "react";
 import type { Product, Locale } from "@/types";
 import { labelFrom } from "@/i18n";
-import { t } from "@/i18n";
+import { errorText, t } from "@/i18n";
 import { SUBCATEGORY_LABELS } from "@/data/categoryLabels";
 import { getProductCategory } from "@/data/categories";
-import { TRADE_FRACTIONS } from "@/data/constants";
 import { useGame } from "@/state/GameProvider";
 import {
   getAssetMark,
@@ -14,13 +13,10 @@ import {
   getProductName,
   getProductDescription,
   getUnitLabel,
-  getMaxTradeQuantity,
-  clampTradeQuantity,
-  getFractionTradeQuantity,
   getTradeEstimateText,
   type TradeSide,
 } from "@/game/engine";
-import { formatDecimalCurrency, formatDecimalNumber } from "@/game/format";
+import { floorDecimalDivision, formatDecimalCurrency, formatDecimalNumber, integerFraction, isPositiveDecimal } from "@/game/format";
 
 interface ProductCardProps {
   product: Product;
@@ -46,19 +42,18 @@ function TradeTicket({
   side: TradeSide;
   onClose: () => void;
 }) {
-  const { state, account, authStatus, actions, pendingCommand, lastError } = useGame();
+  const { state, account, authStatus, tradingLocked, actions, pendingCommand, lastError } = useGame();
   const locale = state.locale;
   const asset = account?.assets.find((item) => item.id === product.id);
   const position = account?.positions.find((item) => item.assetId === product.id);
-  const maxQuantity = side === "sell" ? Number(position?.quantity ?? "0") : getMaxTradeQuantity(state, product, side);
-  const [qty, setQty] = useState(() => (maxQuantity > 0 ? "1" : "0"));
-  useEffect(() => { if (maxQuantity > 0 && qty === "0") setQty("1"); }, [maxQuantity, qty]);
+  const maxQuantity = side === "sell" ? (position?.quantity ?? "0").split(".")[0] : floorDecimalDivision(account?.cash ?? "0", asset?.usdPrice ?? "0");
+  const [qty, setQty] = useState("1");
 
   const unit = getUnitLabel(product, locale);
-  const unavailable = authStatus !== "authenticated" || !asset?.enabled || asset.quoteStatus !== "ACTIVE" || asset.usdPrice === null || account?.settlementLocked;
-  const disabled = unavailable || maxQuantity <= 0 || pendingCommand !== null;
-  const requested = Math.floor(Number(qty) || 0);
-  const confirmDisabled = disabled || requested <= 0;
+  const unavailable = authStatus !== "authenticated" || !asset?.enabled || asset.quoteStatus !== "ACTIVE" || asset.usdPrice === null || tradingLocked;
+  const disabled = unavailable || maxQuantity === "0" || pendingCommand !== null;
+  const validQuantity = /^[1-9]\d*$/.test(qty) && BigInt(qty) <= BigInt(maxQuantity || "0");
+  const confirmDisabled = disabled || !validQuantity;
 
   const sideLabel = side === "buy" ? t(locale, "buyQuantity") : t(locale, "sellQuantity");
   const limitLabel = side === "buy" ? t(locale, "maxBuyable") : t(locale, "maxSellable");
@@ -66,10 +61,9 @@ function TradeTicket({
   const confirmLabel = side === "buy" ? t(locale, "confirmBuy") : t(locale, "confirmSell");
 
   const submit = () => {
-    const q = clampTradeQuantity(state, product, side, qty);
-    if (q <= 0) return;
-    if (side === "buy") actions.buyQty(product.id, q);
-    else actions.sellQty(product.id, q);
+    if (!validQuantity) return;
+    if (side === "buy") actions.buyQty(product.id, qty);
+    else actions.sellQty(product.id, qty);
   };
 
   return (
@@ -94,7 +88,7 @@ function TradeTicket({
             disabled={disabled}
             aria-label={sideLabel}
             onChange={(e) => setQty(e.target.value)}
-            onBlur={() => setQty(String(clampTradeQuantity(state, product, side, qty)))}
+            onBlur={() => { if (!/^[1-9]\d*$/.test(qty)) setQty("1"); }}
           />
         </span>
         <span className="trade-limit">
@@ -102,15 +96,15 @@ function TradeTicket({
         </span>
       </label>
       <div className="trade-fractions" aria-label={fractionHint}>
-        {TRADE_FRACTIONS.map((fraction) => {
-          const label = `1/${Math.round(1 / fraction)}`;
+        {[4n, 8n, 16n, 32n].map((denominator) => {
+          const label = `1/${denominator}`;
           return (
             <button
               key={label}
               type="button"
               disabled={disabled}
               title={`${fractionHint} ${label}`}
-              onClick={() => setQty(String(getFractionTradeQuantity(state, product, side, fraction)))}
+              onClick={() => setQty(integerFraction(maxQuantity, 1n, denominator))}
             >
               {label}
             </button>
@@ -118,7 +112,7 @@ function TradeTicket({
         })}
       </div>
       <p className="trade-estimate">{t(locale, "estimateOnly")}: {getTradeEstimateText(state, product, side, qty)}</p>
-      {lastError && <p className="trade-error" role="alert">{t(locale, `error.${lastError}`)}</p>}
+      {lastError && <p className="trade-error" role="alert">{errorText(locale, lastError)}</p>}
       <div className="trade-ticket-actions">
         <button
           className={`trade-confirm-button ${side}`}
@@ -219,11 +213,11 @@ function ProductCardBase({
   onOpenTicket,
   onCloseTicket,
 }: ProductCardProps) {
-  const { account, authStatus, pendingCommand, actions } = useGame();
+  const { account, authStatus, tradingLocked, pendingCommand, actions } = useGame();
   const asset = account?.assets.find((item) => item.id === product.id);
   const authoritativeOwned = account?.positions.find((item) => item.assetId === product.id)?.quantity;
   const quoteStatus = asset?.quoteStatus ?? "MISSING";
-  const tradeDisabled = authStatus !== "authenticated" || pendingCommand !== null || account?.settlementLocked || !asset?.enabled || quoteStatus !== "ACTIVE" || asset.usdPrice === null;
+  const tradeDisabled = authStatus !== "authenticated" || pendingCommand !== null || tradingLocked || !asset?.enabled || quoteStatus !== "ACTIVE" || asset.usdPrice === null;
   const tagLabel = product.subCategory || getProductCategory(product);
   const sourceLabel = t(locale, `quote.${quoteStatus}`);
   const displayPrice = asset?.usdPrice ? formatDecimalCurrency(asset.usdPrice) : "$--";
@@ -237,7 +231,7 @@ function ProductCardBase({
     >
       <div className="product-visual">
         <ArtMark product={product} />
-        {Number(displayOwned) > 0 ? <span className="owned-badge">x{formatDecimalNumber(displayOwned, locale)}</span> : null}
+        {isPositiveDecimal(displayOwned) ? <span className="owned-badge">x{formatDecimalNumber(displayOwned, locale)}</span> : null}
       </div>
       <div className="product-copy">
         <div className="product-title-row">
@@ -250,6 +244,7 @@ function ProductCardBase({
           <span>
             {sourceLabel} · {asset?.currency ?? currency}{asset?.marketDate ? ` · ${asset.marketDate.slice(0, 10)}` : ""}
           </span>
+          {asset && !asset.enabled && <span className="asset-disabled">{t(locale, "assetDisabled")}</span>}
         </div>
       </div>
       <div className="product-actions">
@@ -272,7 +267,7 @@ function ProductCardBase({
         <button
           className="sell-button"
           type="button"
-          disabled={liquidated || tradeDisabled || Number(displayOwned) <= 0}
+          disabled={liquidated || tradeDisabled || !isPositiveDecimal(displayOwned)}
           onClick={() => onOpenTicket(product.id, "sell")}
         >
           {t(locale, "sell")}
@@ -280,7 +275,7 @@ function ProductCardBase({
         <button
           className="sell-all-button"
           type="button"
-          disabled={liquidated || tradeDisabled || Number(displayOwned) <= 0}
+          disabled={liquidated || tradeDisabled || !isPositiveDecimal(displayOwned)}
           onClick={() => { void actions.sellAll(product.id); }}
         >
           {t(locale, "sellAll")}

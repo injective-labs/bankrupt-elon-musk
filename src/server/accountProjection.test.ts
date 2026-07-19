@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
@@ -22,6 +22,7 @@ import { getAccountProjection } from "./account";
 const d = (value: string) => new Prisma.Decimal(value);
 
 describe("getAccountProjection", () => {
+  afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -42,6 +43,13 @@ describe("getAccountProjection", () => {
 
     expect(mocks.transaction).toHaveBeenCalledOnce();
     expect(mocks.transaction.mock.calls[0][1]).toEqual({ isolationLevel: "RepeatableRead" });
+  });
+
+  it("exposes reset capability from the private server configuration", async () => {
+    vi.stubEnv("ENABLE_GAME_RESET", "true");
+    mocks.playerFindUnique.mockResolvedValue({ walletAddress: "0xabc", walletName: null, cash: d("10"), updatedAt: new Date("2026-07-19"), positions: [] });
+    mocks.assetFindMany.mockResolvedValue([]);
+    await expect(getAccountProjection("0xabc")).resolves.toMatchObject({ resetEnabled: true });
   });
 
   it("values disabled assets that are still held", async () => {

@@ -58,6 +58,7 @@ export interface AccountProjection {
   recentTransactions: TransactionView[];
   marketAsOf: string | null;
   settlementLocked: boolean;
+  resetEnabled: boolean;
   updatedAt: string;
 }
 

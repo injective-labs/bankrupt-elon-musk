@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { GameProvider, useGame } from "@/state/GameProvider";
 import { InjPassProvider } from "@/wallet/InjPassProvider";
 import { ConnectButton } from "@/wallet/ConnectButton";
-import { t } from "@/i18n";
+import { errorText, t } from "@/i18n";
 import { TopBar } from "./TopBar";
 import { FxTicker } from "./FxTicker";
 import { SessionBar } from "./SessionBar";
@@ -25,7 +25,7 @@ function GameShell() {
         <h1>{t(state.locale, "brandTitle")}</h1>
         {authStatus === "loading" ? <p>{t(state.locale, "accountSyncing")}</p> : <ConnectButton />}
         {authStatus === "expired" && <p role="alert">{t(state.locale, "error.UNAUTHORIZED")}</p>}
-        {lastError && <p role="alert">{t(state.locale, `error.${lastError}`)}</p>}
+        {lastError && <p role="alert">{errorText(state.locale, lastError)}</p>}
       </section>
     </main>;
   }

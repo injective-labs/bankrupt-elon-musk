@@ -8,7 +8,7 @@ import { formatDecimalCurrency, formatDecimalNumber } from "@/game/format";
 const numericTone = (value: string) => Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "neutral";
 
 export function PortfolioPanel() {
-  const { account, state, actions, focusedProductId, leaderboard, leaderboardError } = useGame();
+  const { account, state, actions, focusedProductId, leaderboard, leaderboardStatus } = useGame();
   const locale = state.locale;
   const positions = account?.positions ?? [];
   const assets = new Map((account?.assets ?? []).map((asset) => [asset.id, asset]));
@@ -25,7 +25,7 @@ export function PortfolioPanel() {
       </div>
     </div>
     <div className="status-card"><span className="status-dot" aria-hidden="true" />
-      <div><strong>{t(locale, "lossRankTitle")}</strong><p>{leaderboardError ? t(locale, "leaderboardUnavailable") : rank ? `#${rank.rank} / ${rank.total} · ${formatDecimalCurrency(rank.pnl)}` : t(locale, "leaderboardLoading")}</p></div>
+      <div><strong>{t(locale, "lossRankTitle")}</strong><p>{leaderboardStatus === "error" ? t(locale, "leaderboardUnavailable") : leaderboardStatus === "loading" ? t(locale, "leaderboardLoading") : rank ? `#${rank.rank} / ${rank.total} · ${formatDecimalCurrency(rank.pnl)}` : leaderboard?.total === 0 ? t(locale, "noLeaderboardEntries") : t(locale, "notRanked")}</p></div>
     </div>
     <div className="inventory-list" aria-live="polite">
       {positions.length === 0 ? <div className="empty-state"><div className="empty-icon" aria-hidden="true">⌁</div><strong>{t(locale, "emptyTitle")}</strong><p>{t(locale, "emptyText")}</p></div> :

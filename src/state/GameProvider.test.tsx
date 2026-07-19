@@ -18,6 +18,7 @@ const projection = (cash: string): AccountProjection => ({
   recentTransactions: [],
   marketAsOf: null,
   settlementLocked: false,
+  resetEnabled: false,
   updatedAt: "2026-07-19T00:00:00.000Z",
 });
 
@@ -50,9 +51,9 @@ function Probe() {
     <output data-testid="pending">{game.pendingCommand ?? "none"}</output>
     <output data-testid="error">{game.lastError ?? "none"}</output>
     <button onClick={() => void game.actions.login("0x1111111111111111111111111111111111111111", "tester", async () => new Uint8Array([1, 2]))}>login</button>
-    <button onClick={() => void game.actions.buyQty("asset", 2)}>buy</button>
+    <button onClick={() => void game.actions.buyQty("asset", "2")}>buy</button>
     <button onClick={() => void game.actions.buyQty("asset", "9007199254740993125")}>buy-exact</button>
-    <button onClick={() => { void game.actions.buyQty("asset", 2); void game.actions.buyQty("asset", 2); }}>double-buy</button>
+    <button onClick={() => { void game.actions.buyQty("asset", "2"); void game.actions.buyQty("asset", "2"); }}>double-buy</button>
     <button onClick={() => void game.actions.buyMax("asset")}>buy-max</button>
     <button onClick={() => void game.actions.sellAll("asset")}>sell-all</button>
     <button onClick={() => void game.actions.logout()}>logout</button>
@@ -250,5 +251,19 @@ describe("GameProvider", () => {
     expect(game.authStatus).toBe("authenticated");
     expect(game.account?.cash).toBe("10");
     expect(game.lastError).toBe("LOGOUT_FAILED");
+  });
+
+  it("ticks into the live settlement window after the projection has loaded", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T08:59:59.000Z"));
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockResolvedValue(projection("10")), getLeaderboard: vi.fn().mockResolvedValue({ top: [], total: 0, you: null }) });
+    let game!: ReturnType<typeof useGame>;
+    function Capture() { game = useGame(); return null; }
+    render(<GameProvider api={client}><Capture /></GameProvider>);
+    await act(async () => { await vi.runAllTicks(); await Promise.resolve(); await Promise.resolve(); });
+    expect(game.tradingLocked).toBe(false);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(game.tradingLocked).toBe(true);
+    vi.useRealTimers();
   });
 });

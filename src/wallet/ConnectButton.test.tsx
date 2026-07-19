@@ -15,7 +15,7 @@ vi.mock("./InjPassProvider", () => ({
 import { ConnectButton } from "./ConnectButton";
 
 const account: AccountProjection = {
-  walletAddress: "0x1111111111111111111111111111111111111111", walletName: "restored", cash: "1", holdingsValue: "0", netWorth: "1", pnl: "0", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "2026-07-19T00:00:00.000Z",
+  walletAddress: "0x1111111111111111111111111111111111111111", walletName: "restored", cash: "1", holdingsValue: "0", netWorth: "1", pnl: "0", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T00:00:00.000Z",
 };
 
 describe("ConnectButton", () => {

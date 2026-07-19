@@ -27,3 +27,12 @@
 
 - Build output includes existing informational warnings for deprecated `package.json#prisma` configuration and stale `baseline-browser-mapping` data; neither affects the successful build.
 - Legacy engine remains present for Task 10, but authoritative totals, positions, quote eligibility, ranking, activity, and max commands no longer depend on its simulated fallbacks.
+
+## Findings Follow-up
+
+- The market catalog now derives solely from projection assets, including DB-only assets and disabled held assets; local metadata is an optional visual overlay by ID.
+- A provider-owned one-second settlement clock is shared by cards, reset controls, and the session bar, and transitions controls at the boundary without waiting for another projection.
+- Ticket quantities, maximums, and fractions use exact strings and `BigInt`; explicit values above `Number.MAX_SAFE_INTEGER` remain unchanged and max commands remain `MAX`.
+- Backend error codes map to safe bilingual copy with a generic unknown-code fallback.
+- `resetEnabled` is included in projections and replay validators and is sourced only from private server configuration.
+- Leaderboard loading, loaded-empty, unranked, and error states are distinct.

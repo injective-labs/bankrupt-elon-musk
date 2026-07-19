@@ -2118,6 +2118,11 @@ button:disabled {
   font-weight: 700;
 }
 
+.asset-disabled {
+  color: #b42318;
+  font-weight: 700;
+}
+
 .trade-confirm-button,
 .trade-cancel-button {
   min-height: 36px;

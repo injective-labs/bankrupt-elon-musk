@@ -132,6 +132,7 @@ export async function getAccountProjectionInTransaction(
     recentTransactions,
     marketAsOf,
     settlementLocked: isSettlementLocked(now),
+    resetEnabled: process.env.ENABLE_GAME_RESET === "true",
     updatedAt: player.updatedAt.toISOString(),
   };
 }
