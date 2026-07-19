@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { buildAssetSeed } from "./assetSeed";
+import { getInvestmentProducts } from "./categories";
+import { getQuoteSymbol } from "../game/pricing";
 
 describe("buildAssetSeed", () => {
   it("builds the complete enabled asset catalogue in display order", () => {
@@ -30,5 +32,12 @@ describe("buildAssetSeed", () => {
       贵金属: 5,
       大宗商品: 7,
     });
+  });
+
+  it("rejects duplicate Yahoo quote symbols", () => {
+    const products = getInvestmentProducts().map((product) => ({ ...product }));
+    products[1].quoteSymbol = getQuoteSymbol(products[0]);
+
+    expect(() => buildAssetSeed(products)).toThrow(/duplicate Yahoo quote symbol/i);
   });
 });

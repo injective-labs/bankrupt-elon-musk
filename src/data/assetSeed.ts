@@ -1,5 +1,6 @@
 import { getInvestmentProducts, getProductCategory } from "./categories";
 import { getQuoteSymbol } from "../game/pricing";
+import type { Product } from "../types";
 
 export interface AssetSeedRow {
   id: string;
@@ -16,9 +17,9 @@ export interface AssetSeedRow {
   displayOrder: number;
 }
 
-export function buildAssetSeed(): AssetSeedRow[] {
-  const products = getInvestmentProducts();
+export function buildAssetSeed(products: Product[] = getInvestmentProducts()): AssetSeedRow[] {
   const ids = new Set<string>();
+  const quoteSymbols = new Set<string>();
 
   return products.map((product, displayOrder) => {
     const id = product.id?.trim();
@@ -32,7 +33,11 @@ export function buildAssetSeed(): AssetSeedRow[] {
     if (!ticker) throw new Error(`Asset ${id} is missing a ticker`);
     if (!currency) throw new Error(`Asset ${id} is missing a currency`);
     if (!quoteSymbol) throw new Error(`Asset ${id} is missing a Yahoo quote symbol`);
+    if (quoteSymbols.has(quoteSymbol)) {
+      throw new Error(`Asset ${id} has a duplicate Yahoo quote symbol: ${quoteSymbol}`);
+    }
     ids.add(id);
+    quoteSymbols.add(quoteSymbol);
 
     return {
       id,
