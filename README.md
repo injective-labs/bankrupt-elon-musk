@@ -14,18 +14,10 @@ INJ Pass 夏季特别活动小游戏的 React + TypeScript + Tailwind (Next.js) 
 
 ## 数据库(规范化)
 
-四张表(见 [prisma/schema.prisma](prisma/schema.prisma)):
-
-- `Player` — 一玩家一行(主键=钱包地址):账户标量(cash/debt/leverage/liquidated…)+ 排行榜快照列
-  (`netWorth`/`pnl`/`holdingsValue`,保存时由前端用实时价算好回传)+ UI 偏好(locale/sound/sort);`@@index([pnl])`。
-- `Position` — 持仓明细,一资产一行(`@@unique([walletAddress, productId])`)。
-- `TradeLog` — 成交历史(append-only),带客户端单调 `ts`,后端按 ts 幂等增量插入。
-- `AuthNonce` — 登录一次性 nonce。
-
-后端 PUT 把客户端整局 `GameState` **拆解入多表**(事务),GET **重组**回 `GameState`;
-行情/汇率不入库(前端连上后自行向 Yahoo 重拉)。`GET /api/leaderboard` 按 `pnl` 升序返回真实
-"亏钱榜"(爆仓/亏得最多在前)+ 调用方真实名次;游戏 [PortfolioPanel](src/components/PortfolioPanel.tsx)
-连接钱包后用真实名次替换内置的模拟名次,未连接时回退模拟值。
+数据库定义见 [prisma/schema.prisma](prisma/schema.prisma)。`Player` 保存服务端资金，`Position`
+保存当前持仓，`Transaction` 是不可变的买入、卖出和重置账本。`Asset` 保存 160 个可交易资产，
+`AssetQuote` 保存每个资产的权威最新报价，`AssetDailyPrice` 只从上线后的刷新任务开始逐日积累；
+部署不会回填历史行情。排行榜完全根据数据库中的现金、持仓和权威报价计算，不接受客户端 P&L。
 
 ## 运行
 
@@ -37,13 +29,50 @@ docker run -d --name bankrupt-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ba
 
 pnpm prisma generate           # 生成 Prisma Client
 pnpm prisma migrate deploy     # 在全新库上套用 prisma/migrations 建表
-# 开发期改 schema 后同步可用:pnpm prisma db push
+pnpm prisma db seed            # 幂等写入 160 个资产
 
 pnpm dev                       # http://localhost:3002
 ```
 
 构建:`pnpm build && pnpm start`。没有 Postgres 时游戏仍可玩(仅本地 localStorage 存档);
 云存档需要 `DATABASE_URL` 可用。
+
+## 部署、检查与恢复
+
+生产部署严格按以下顺序执行。迁移只向前应用，种子为幂等 upsert：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm prisma migrate deploy
+pnpm prisma db seed
+pnpm test
+pnpm build
+```
+
+部署后用只读 SQL 检查资产报价数、逐日价格数和交易账本。以下命令读取当前环境的
+`DATABASE_URL`，不会修改数据：
+
+```bash
+psql "$DATABASE_URL" -c 'SELECT COUNT(*) AS assets, COUNT(q."assetId") AS quotes FROM "Asset" a LEFT JOIN "AssetQuote" q ON q."assetId" = a.id;'
+psql "$DATABASE_URL" -c 'SELECT COUNT(*) AS daily_prices, MIN("marketDate") AS first_date, MAX("marketDate") AS last_date FROM "AssetDailyPrice";'
+psql "$DATABASE_URL" -c 'SELECT id, "walletAddress", type, "assetId", quantity, "usdAmount", "cashAfter", "createdAt" FROM "Transaction" ORDER BY id DESC LIMIT 20;'
+```
+
+要关闭游戏重置，在运行环境中设置变量并重新部署应用：
+
+```bash
+ENABLE_GAME_RESET=false
+```
+
+应用版本需要回退时，只回滚应用部署，不执行降级迁移，也不删除新表或新数据。Vercel 部署可用：
+
+```bash
+vercel rollback <previous-production-deployment-url>
+```
+
+回退后再次运行上面的三条只读检查命令，确认报价、逐日价格和交易账本仍然存在。若旧应用版本
+与已向前迁移的 schema 不兼容，应部署一个兼容性修复版本；不要运行 `prisma migrate reset`、
+`prisma db push --force-reset` 或手工删除生产数据。
 
 ## 行情来源
 
