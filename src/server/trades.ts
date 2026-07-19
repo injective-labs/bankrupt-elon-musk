@@ -48,17 +48,20 @@ function storedCommand(value: unknown): TradeCommand {
 
 function isStringOrNull(value: unknown): value is string | null { return typeof value === "string" || value === null; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function isOptionalString(value: unknown): boolean { return value === undefined || value === null || typeof value === "string"; }
+function isDecimalString(value: unknown): value is string { return typeof value === "string" && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value); }
+function isDateString(value: unknown): value is string { return typeof value === "string" && Number.isFinite(Date.parse(value)); }
 function projectionSnapshot(value: unknown): AccountProjection {
   if (!isRecord(value)
     || typeof value.walletAddress !== "string" || !isStringOrNull(value.walletName ?? null)
-    || typeof value.cash !== "string" || typeof value.holdingsValue !== "string" || typeof value.netWorth !== "string" || typeof value.pnl !== "string"
+    || !isDecimalString(value.cash) || !isDecimalString(value.holdingsValue) || !isDecimalString(value.netWorth) || !isDecimalString(value.pnl)
     || !Array.isArray(value.positions) || !Array.isArray(value.assets) || !Array.isArray(value.recentTransactions)
-    || !isStringOrNull(value.marketAsOf) || typeof value.settlementLocked !== "boolean" || typeof value.updatedAt !== "string") {
+    || !(value.marketAsOf === null || isDateString(value.marketAsOf)) || typeof value.settlementLocked !== "boolean" || !isDateString(value.updatedAt)) {
     throw new ApiError(500, "INVALID_TRADE_SNAPSHOT", "Stored trade result is invalid");
   }
-  const validPositions = value.positions.every((item) => isRecord(item) && typeof item.assetId === "string" && typeof item.quantity === "string" && typeof item.costBasis === "string" && isStringOrNull(item.marketValue) && isStringOrNull(item.unrealizedPnl));
-  const validAssets = value.assets.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string" && typeof item.category === "string" && typeof item.ticker === "string" && typeof item.currency === "string" && typeof item.unit === "string" && typeof item.enabled === "boolean" && typeof item.displayOrder === "number" && isStringOrNull(item.usdPrice) && isStringOrNull(item.marketDate) && ["ACTIVE", "STALE", "ERROR", "MISSING"].includes(String(item.quoteStatus)));
-  const validTransactions = value.recentTransactions.every((item) => isRecord(item) && typeof item.id === "string" && ["BUY", "SELL", "RESET"].includes(String(item.type)) && isStringOrNull(item.assetId) && isStringOrNull(item.quantity) && isStringOrNull(item.usdUnitPrice) && typeof item.usdAmount === "string" && typeof item.createdAt === "string");
+  const validPositions = value.positions.every((item) => isRecord(item) && typeof item.assetId === "string" && isDecimalString(item.quantity) && isDecimalString(item.costBasis) && (item.marketValue === null || isDecimalString(item.marketValue)) && (item.unrealizedPnl === null || isDecimalString(item.unrealizedPnl)));
+  const validAssets = value.assets.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string" && isOptionalString(item.nameEn) && typeof item.category === "string" && isOptionalString(item.subCategory) && typeof item.ticker === "string" && typeof item.currency === "string" && typeof item.unit === "string" && isOptionalString(item.unitEn) && typeof item.enabled === "boolean" && Number.isInteger(item.displayOrder) && (item.usdPrice === null || isDecimalString(item.usdPrice)) && (item.marketDate === null || isDateString(item.marketDate)) && ["ACTIVE", "STALE", "ERROR", "MISSING"].includes(String(item.quoteStatus)));
+  const validTransactions = value.recentTransactions.every((item) => isRecord(item) && /^\d+$/.test(String(item.id)) && ["BUY", "SELL", "RESET"].includes(String(item.type)) && isStringOrNull(item.assetId) && (item.quantity === null || isDecimalString(item.quantity)) && (item.usdUnitPrice === null || isDecimalString(item.usdUnitPrice)) && isDecimalString(item.usdAmount) && isDateString(item.createdAt));
   if (!validPositions || !validAssets || !validTransactions) throw new ApiError(500, "INVALID_TRADE_SNAPSHOT", "Stored trade result is invalid");
   return value as unknown as AccountProjection;
 }
@@ -67,6 +70,11 @@ function assertDecimal(value: Prisma.Decimal, max: Prisma.Decimal, scale: number
   if (!value.isFinite() || value.abs().gt(max) || value.decimalPlaces() > scale) {
     throw new ApiError(422, "VALUE_OUT_OF_RANGE", "Trade value exceeds supported precision or range");
   }
+}
+
+// Database money policy: every USD-derived value is rounded HALF_UP to Decimal(30,8).
+function money(value: Prisma.Decimal): Prisma.Decimal {
+  return value.toDecimalPlaces(8, Prisma.Decimal.ROUND_HALF_UP);
 }
 
 function replay(row: { commandSnapshot: Prisma.JsonValue; resultSnapshot: Prisma.JsonValue }, command: TradeCommand): AccountProjection {
@@ -105,7 +113,7 @@ export async function executeTrade(walletAddress: string, command: TradeCommand)
         } else quantity = quantityFrom(command.quantity);
         assertDecimal(quantity, MAX_QUANTITY, 12);
 
-        const amount = price.mul(quantity);
+        const amount = money(price.mul(quantity));
         const quantityBefore = position?.quantity ?? new Prisma.Decimal(0);
         const costBefore = position?.costBasis ?? new Prisma.Decimal(0);
         let cashAfter: Prisma.Decimal;
@@ -113,17 +121,18 @@ export async function executeTrade(walletAddress: string, command: TradeCommand)
         let costAfter: Prisma.Decimal;
         if (command.side === "BUY") {
           if (amount.gt(player.cash)) throw new ApiError(422, "INSUFFICIENT_CASH", "Insufficient cash");
-          cashAfter = player.cash.sub(amount); quantityAfter = quantityBefore.add(quantity); costAfter = costBefore.add(amount);
-          await tx.position.upsert({ where: positionKey(walletAddress, command.assetId), create: { walletAddress, assetId: command.assetId, quantity: quantityAfter, costBasis: costAfter }, update: { quantity: quantityAfter, costBasis: costAfter } });
+          cashAfter = money(player.cash.sub(amount)); quantityAfter = quantityBefore.add(quantity); costAfter = money(costBefore.add(amount));
         } else {
           if (!position || quantity.gt(quantityBefore)) throw new ApiError(422, "INSUFFICIENT_HOLDINGS", "Insufficient holdings");
-          cashAfter = player.cash.add(amount); quantityAfter = quantityBefore.sub(quantity);
-          costAfter = quantityAfter.isZero() ? new Prisma.Decimal(0) : costBefore.mul(quantityAfter).div(quantityBefore);
-          if (quantityAfter.isZero()) await tx.position.delete({ where: positionKey(walletAddress, command.assetId) });
-          else await tx.position.update({ where: positionKey(walletAddress, command.assetId), data: { quantity: quantityAfter, costBasis: costAfter } });
+          cashAfter = money(player.cash.add(amount)); quantityAfter = quantityBefore.sub(quantity);
+          costAfter = quantityAfter.isZero() ? new Prisma.Decimal(0) : money(costBefore.mul(quantityAfter).div(quantityBefore));
         }
         assertDecimal(quantityAfter, MAX_QUANTITY, 12);
         for (const value of [amount, cashAfter, costAfter, player.cash, costBefore]) assertDecimal(value, MAX_MONEY, 8);
+        if (command.side === "BUY") {
+          await tx.position.upsert({ where: positionKey(walletAddress, command.assetId), create: { walletAddress, assetId: command.assetId, quantity: quantityAfter, costBasis: costAfter }, update: { quantity: quantityAfter, costBasis: costAfter } });
+        } else if (quantityAfter.isZero()) await tx.position.delete({ where: positionKey(walletAddress, command.assetId) });
+        else await tx.position.update({ where: positionKey(walletAddress, command.assetId), data: { quantity: quantityAfter, costBasis: costAfter } });
         await tx.player.update({ where: { walletAddress }, data: { cash: cashAfter } });
         const ledger = await tx.transaction.create({ data: {
           walletAddress, idempotencyKey: command.idempotencyKey, type: command.side, assetId: command.assetId,

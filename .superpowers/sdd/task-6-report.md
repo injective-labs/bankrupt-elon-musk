@@ -83,3 +83,12 @@ The already-migrated local PostgreSQL verification database received nullable te
 - Fresh PostgreSQL trade suite after the build: 3/3 passed.
 
 The build emitted only the existing Prisma 7 configuration deprecation and stale `baseline-browser-mapping` metadata notices.
+
+## Review follow-up: forward migration and rounding policy
+
+- Restored the original `20260719_server_authoritative_game` migration content. New `20260719_trade_snapshots` adds nullable JSONB columns, backfills every existing ledger row with `{ "legacy": true, "reason": "pre_snapshot_transaction" }`, then enforces `NOT NULL`. Schema fields remain required. Legacy sentinels deliberately fail replay validation with `INVALID_TRADE_SNAPSHOT`.
+- Verified the real upgrade path in two `prisma migrate deploy` stages on a fresh PostgreSQL database: first the original two migrations, then a legacy Player/Transaction fixture, then the forward snapshot migration. Both snapshots contained the explicit sentinel after migration. A separate clean three-migration deploy and the 3/3 PostgreSQL trade race suite also passed without manual ALTER.
+- Trade accounting now computes every after-value before the first Player/Position/Transaction write. Quantity precision/range is validated before balance logic and every write.
+- USD amount, cash, and cost basis use one documented `ROUND_HALF_UP` policy to 8 decimals. The rounded amount is used consistently for affordability, balances, positions, ledger fields, and the in-transaction projection. Unit prices and rates retain their authoritative 12-decimal storage.
+- Tests prove `0.123456789 × 2` persists as `0.24691358`, cash as `99.75308642`, and partial average-cost reduction of `10 / 3` retains `6.66666667` instead of failing on repeating precision.
+- Snapshot validation now covers optional strings, plain decimal syntax, parseable dates, enum statuses/types, integer display order, and unsigned transaction IDs; malformed or legacy JSON fails closed.

@@ -95,9 +95,16 @@ describe("executeTrade", () => {
 
   it.each([
     [{ assetId: 1 }, { cash: "1" }],
+    [{ legacy: true, reason: "pre_snapshot_transaction" }, { legacy: true, reason: "pre_snapshot_transaction" }],
     [command, { cash: 1 }],
   ])("rejects malformed persisted JSON snapshots", async (commandSnapshot, resultSnapshot) => {
     mocks.transactionFind.mockResolvedValue({ id: 1n, commandSnapshot, resultSnapshot });
+    await expect(executeTrade(wallet, command)).rejects.toMatchObject({ status: 500, code: "INVALID_TRADE_SNAPSHOT" });
+  });
+
+  it("validates optional strings and decimal/date/status formats in snapshots", async () => {
+    const bad = { walletAddress: wallet, walletName: 7, cash: "NaN", holdingsValue: "0", netWorth: "0", pnl: "0", positions: [], assets: [{ id: "a", name: "A", nameEn: 7, category: "x", ticker: "A", currency: "USD", unit: "u", enabled: true, displayOrder: 1, usdPrice: "1e3", marketDate: "not-date", quoteStatus: "BOGUS" }], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "not-date" };
+    mocks.transactionFind.mockResolvedValue({ commandSnapshot: command, resultSnapshot: bad });
     await expect(executeTrade(wallet, command)).rejects.toMatchObject({ status: 500, code: "INVALID_TRADE_SNAPSHOT" });
   });
 
@@ -125,10 +132,22 @@ describe("executeTrade", () => {
     expect(mocks.transactionCreate).not.toHaveBeenCalled();
   });
 
-  it("rejects a monetary result with more than eight decimal places", async () => {
+  it("rounds authoritative unit-derived money HALF_UP to eight decimal places", async () => {
     mocks.asset.mockResolvedValue({ id: "stock", enabled: true, quote: { nativePrice: d("0.123456789"), currency: "USD", fxRateToUsd: d("1"), usdPrice: d("0.123456789"), marketDate: new Date("2026-07-18"), status: "ACTIVE" } });
-    await expect(executeTrade(wallet, command)).rejects.toMatchObject({ status: 422, code: "VALUE_OUT_OF_RANGE" });
-    expect(mocks.transactionCreate).not.toHaveBeenCalled();
+    await executeTrade(wallet, command);
+    expect(mocks.transactionCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ usdAmount: d("0.24691358"), cashAfter: d("99.75308642") }) }));
+  });
+
+  it("rounds repeating average cost HALF_UP to eight decimals", async () => {
+    mocks.position.mockResolvedValue({ quantity: d("3"), costBasis: d("10") });
+    await executeTrade(wallet, { ...command, side: "SELL", quantity: "1" });
+    expect(mocks.positionUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { quantity: d("2"), costBasis: d("6.66666667") } }));
+  });
+
+  it("computes and validates all after-values before any write", async () => {
+    mocks.position.mockResolvedValue({ quantity: d("999999999999999999"), costBasis: d("1") });
+    await expect(executeTrade(wallet, command)).rejects.toMatchObject({ code: "VALUE_OUT_OF_RANGE" });
+    expect(mocks.positionUpsert).not.toHaveBeenCalled(); expect(mocks.playerUpdate).not.toHaveBeenCalled(); expect(mocks.transactionCreate).not.toHaveBeenCalled();
   });
 
   it("uses Serializable isolation and retries P2034 conflicts only a bounded number", async () => {
