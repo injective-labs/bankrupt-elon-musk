@@ -97,4 +97,18 @@ describe("ProductCard authoritative trading states", () => {
     act(() => vi.advanceTimersByTime(1000));
     expect(buy).toBeDisabled();
   });
+
+  it("disables an ACTIVE quote when it crosses from seven to eight UTC calendar days", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T23:59:59.000Z"));
+    const dated = { ...asset, marketDate: "2026-07-13T00:00:00.000Z" };
+    const client = api({ getGame: vi.fn().mockResolvedValue(account({ assets: [dated] })) });
+    render(<GameProvider api={client}><ProductCard {...props} /></GameProvider>);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const buy = screen.getByRole("button", { name: "Buy" });
+    expect(buy).toBeEnabled();
+    act(() => vi.advanceTimersByTime(1000));
+    expect(buy).toBeDisabled();
+    expect(screen.getByText(/价格过期|Stale price/)).toBeInTheDocument();
+  });
 });

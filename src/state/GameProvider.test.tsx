@@ -266,4 +266,19 @@ describe("GameProvider", () => {
     expect(game.tradingLocked).toBe(true);
     vi.useRealTimers();
   });
+
+  it("ticks out of settlement even when the loaded snapshot said locked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T09:59:59.000Z"));
+    const lockedProjection = { ...projection("10"), settlementLocked: true };
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockResolvedValue(lockedProjection), getLeaderboard: vi.fn().mockResolvedValue({ top: [], total: 0, you: null }) });
+    let game!: ReturnType<typeof useGame>;
+    function Capture() { game = useGame(); return null; }
+    render(<GameProvider api={client}><Capture /></GameProvider>);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(game.tradingLocked).toBe(true);
+    act(() => vi.advanceTimersByTime(2000));
+    expect(game.tradingLocked).toBe(false);
+    vi.useRealTimers();
+  });
 });

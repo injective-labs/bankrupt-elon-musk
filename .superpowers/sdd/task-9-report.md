@@ -36,3 +36,10 @@
 - Backend error codes map to safe bilingual copy with a generic unknown-code fallback.
 - `resetEnabled` is included in projections and replay validators and is sourced only from private server configuration.
 - Leaderboard loading, loaded-empty, unranked, and error states are distinct.
+
+## Time-boundary Follow-up
+
+- The active settlement gate now derives only from the provider's live one-second clock; `account.settlementLocked` remains informational and cannot strand controls after the live window exits.
+- `SessionBar`, trade cards, and reset controls consume that same provider clock/gate.
+- Client quote eligibility recomputes on every shared tick using the same UTC calendar-day helper as the server: age 7 is valid, age 8 is stale, and future dates are invalid.
+- Fake-time regressions cover settlement entry and exit plus an ACTIVE quote aging stale across UTC midnight without a projection refresh.

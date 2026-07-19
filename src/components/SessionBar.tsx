@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useGame } from "@/state/GameProvider";
 import { t } from "@/i18n";
 import {
@@ -24,14 +23,8 @@ function segmentRangeLabel(locale: Locale, type: SegmentType, range: SessionSegm
 }
 
 export function SessionBar() {
-  const { state, tradingLocked } = useGame();
+  const { state, clockNow: now, tradingLocked } = useGame();
   const locale = state.locale;
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
 
   const session = getTradingSessionState(now);
   const locked = tradingLocked;

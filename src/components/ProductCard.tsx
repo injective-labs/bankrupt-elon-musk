@@ -17,6 +17,7 @@ import {
   type TradeSide,
 } from "@/game/engine";
 import { floorDecimalDivision, formatDecimalCurrency, formatDecimalNumber, integerFraction, isPositiveDecimal } from "@/game/format";
+import { isQuoteFresh } from "@/game/quoteFreshness";
 
 interface ProductCardProps {
   product: Product;
@@ -42,7 +43,7 @@ function TradeTicket({
   side: TradeSide;
   onClose: () => void;
 }) {
-  const { state, account, authStatus, tradingLocked, actions, pendingCommand, lastError } = useGame();
+  const { state, account, clockNow, authStatus, tradingLocked, actions, pendingCommand, lastError } = useGame();
   const locale = state.locale;
   const asset = account?.assets.find((item) => item.id === product.id);
   const position = account?.positions.find((item) => item.assetId === product.id);
@@ -50,7 +51,8 @@ function TradeTicket({
   const [qty, setQty] = useState("1");
 
   const unit = getUnitLabel(product, locale);
-  const unavailable = authStatus !== "authenticated" || !asset?.enabled || asset.quoteStatus !== "ACTIVE" || asset.usdPrice === null || tradingLocked;
+  const quoteFresh = Boolean(asset?.marketDate && isQuoteFresh(asset.marketDate, clockNow));
+  const unavailable = authStatus !== "authenticated" || !asset?.enabled || asset.quoteStatus !== "ACTIVE" || !quoteFresh || asset.usdPrice === null || tradingLocked;
   const disabled = unavailable || maxQuantity === "0" || pendingCommand !== null;
   const validQuantity = /^[1-9]\d*$/.test(qty) && BigInt(qty) <= BigInt(maxQuantity || "0");
   const confirmDisabled = disabled || !validQuantity;
@@ -213,10 +215,10 @@ function ProductCardBase({
   onOpenTicket,
   onCloseTicket,
 }: ProductCardProps) {
-  const { account, authStatus, tradingLocked, pendingCommand, actions } = useGame();
+  const { account, clockNow, authStatus, tradingLocked, pendingCommand, actions } = useGame();
   const asset = account?.assets.find((item) => item.id === product.id);
   const authoritativeOwned = account?.positions.find((item) => item.assetId === product.id)?.quantity;
-  const quoteStatus = asset?.quoteStatus ?? "MISSING";
+  const quoteStatus = asset?.quoteStatus === "ACTIVE" && asset.marketDate && !isQuoteFresh(asset.marketDate, clockNow) ? "STALE" : asset?.quoteStatus ?? "MISSING";
   const tradeDisabled = authStatus !== "authenticated" || pendingCommand !== null || tradingLocked || !asset?.enabled || quoteStatus !== "ACTIVE" || asset.usdPrice === null;
   const tagLabel = product.subCategory || getProductCategory(product);
   const sourceLabel = t(locale, `quote.${quoteStatus}`);

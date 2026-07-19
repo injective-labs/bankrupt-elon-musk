@@ -71,7 +71,7 @@ export interface GameActions {
   toggleSound(): void; toggleLocale(): void; setCategory(category: string): void; setSubcategory(subcategory: string): void; setSearch(search: string): void; setSort(sort: SortMode): void; focusProduct(id: string): void;
 }
 
-interface GameContextValue { authStatus: AuthStatus; account: AccountProjection | null; tradingLocked: boolean; leaderboard: LeaderboardSnapshot | null; leaderboardStatus: "idle" | "loading" | "loaded" | "error"; leaderboardError: boolean; state: GameState; actions: GameActions; pendingCommand: PendingCommand | null; lastError: string | null; focusedProductId: string | null; flashTick: number; ready: boolean }
+interface GameContextValue { authStatus: AuthStatus; account: AccountProjection | null; clockNow: Date; tradingLocked: boolean; leaderboard: LeaderboardSnapshot | null; leaderboardStatus: "idle" | "loading" | "loaded" | "error"; leaderboardError: boolean; state: GameState; actions: GameActions; pendingCommand: PendingCommand | null; lastError: string | null; focusedProductId: string | null; flashTick: number; ready: boolean }
 const GameContext = createContext<GameContextValue | null>(null);
 export function useGame() { const value = useContext(GameContext); if (!value) throw new Error("useGame must be used within GameProvider"); return value; }
 
@@ -81,7 +81,7 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   const [leaderboard, setLeaderboard] = useState<LeaderboardSnapshot | null>(null);
   const [leaderboardError, setLeaderboardError] = useState(false);
   const [leaderboardStatus, setLeaderboardStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
-  const [liveSettlementLocked, setLiveSettlementLocked] = useState(() => isSettlementLocked());
+  const [clockNow, setClockNow] = useState(() => new Date());
   const [preferences, setPreferences] = useState(initialPreferences);
   const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -176,8 +176,8 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   }), [api, command, explicitQuantity, fail, loadGame, trade]);
 
   const state = useMemo(() => projectionState(account, preferences), [account, preferences]);
-  useEffect(() => { const update = () => setLiveSettlementLocked(isSettlementLocked()); update(); const id = setInterval(update, 1000); return () => clearInterval(id); }, []);
-  const tradingLocked = Boolean(account?.settlementLocked || liveSettlementLocked);
+  useEffect(() => { const update = () => setClockNow(new Date()); update(); const id = setInterval(update, 1000); return () => clearInterval(id); }, []);
+  const tradingLocked = isSettlementLocked(clockNow);
   useEffect(() => {
     if (authStatus !== "authenticated") { setLeaderboard(null); setLeaderboardError(false); setLeaderboardStatus("idle"); return; }
     let active = true;
@@ -185,5 +185,5 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
     void Promise.resolve(api.getLeaderboard()).then((value) => { if (active && value) { setLeaderboard(value); setLeaderboardStatus("loaded"); } }).catch(() => { if (active) { setLeaderboard(null); setLeaderboardError(true); setLeaderboardStatus("error"); } });
     return () => { active = false; };
   }, [api, authStatus, account?.updatedAt]);
-  return <GameContext.Provider value={{ authStatus, account, tradingLocked, leaderboard, leaderboardStatus, leaderboardError, state, actions, pendingCommand, lastError, focusedProductId, flashTick: 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;
+  return <GameContext.Provider value={{ authStatus, account, clockNow, tradingLocked, leaderboard, leaderboardStatus, leaderboardError, state, actions, pendingCommand, lastError, focusedProductId, flashTick: 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;
 }
