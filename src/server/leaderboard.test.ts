@@ -9,6 +9,12 @@ import { getLossLeaderboard } from "./leaderboard";
 const d = (value: string) => new Prisma.Decimal(value);
 
 describe("getLossLeaderboard", () => {
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, 0, -4, 0.7])("normalizes an invalid exported limit %s to at least one", async (limit) => {
+    mocks.queryRaw.mockResolvedValueOnce([{ hasInvalidQuotes: false }]).mockResolvedValueOnce([]);
+    await getLossLeaderboard(null, limit);
+    const sql = mocks.queryRaw.mock.calls[1][0];
+    expect(sql.values).toContain(1);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.mockImplementation((operation) => operation({ $queryRaw: mocks.queryRaw }));

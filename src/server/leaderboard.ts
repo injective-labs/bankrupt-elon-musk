@@ -22,7 +22,9 @@ export async function getLossLeaderboard(
   walletAddress: string | null,
   limit: number,
 ): Promise<LeaderboardSnapshot> {
-  const boundedLimit = Math.max(0, Math.min(Math.trunc(limit), 100));
+  const boundedLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.min(Math.trunc(limit), 100))
+    : 1;
   return prisma.$transaction(async (tx) => {
     const invalid = await tx.$queryRaw<Array<{ hasInvalidQuotes: boolean }>>(Prisma.sql`
       SELECT EXISTS (
