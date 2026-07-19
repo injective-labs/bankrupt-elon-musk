@@ -83,7 +83,7 @@ describeDatabase("migrated authenticated game flow (PostgreSQL)", () => {
     await prisma.$disconnect();
   });
 
-  it("has every migration applied and seeds exactly 160 assets", async () => {
+  it("has every migration applied and two idempotent seed runs leave 160 assets with no daily backfill", async () => {
     const migrations = await prisma.$queryRaw<Array<{ migration_name: string }>>`
       SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL
     `;
@@ -93,6 +93,7 @@ describeDatabase("migrated authenticated game flow (PostgreSQL)", () => {
       "20260719_trade_snapshots",
     ]));
     expect(await prisma.asset.count()).toBe(160);
+    expect(await prisma.assetDailyPrice.count()).toBe(0);
   });
 
   it("funds the first wallet login once and preserves changed cash on the second login", async () => {
@@ -174,6 +175,58 @@ describeDatabase("migrated authenticated game flow (PostgreSQL)", () => {
 
     await prisma.$executeRawUnsafe('DROP TRIGGER "task11_fail_transaction" ON "Transaction"');
     await prisma.$executeRawUnsafe('DROP FUNCTION task11_fail_transaction()');
+  });
+
+  it("allows at most one simultaneous buy that would overspend the account", async () => {
+    await prisma.player.create({ data: { walletAddress: account.address, cash: new Prisma.Decimal(100), lastLoginAt: new Date() } });
+    const commands = [
+      { assetId, side: "BUY", quantity: "1", idempotencyKey: "00000000-0000-4000-8000-000000000121" },
+      { assetId, side: "BUY", quantity: "1", idempotencyKey: "00000000-0000-4000-8000-000000000122" },
+    ];
+    const responses = await Promise.all(commands.map((body) => trade(authenticated("http://localhost/api/trades", cookie, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }))));
+
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect((await prisma.player.findUniqueOrThrow({ where: { walletAddress: account.address } })).cash.toString()).toBe("0");
+    expect(await prisma.transaction.count({ where: { walletAddress: account.address } })).toBe(1);
+  });
+
+  it("replays concurrent requests with the same key with one debit and ledger row", async () => {
+    await prisma.player.create({ data: { walletAddress: account.address, cash: new Prisma.Decimal(100), lastLoginAt: new Date() } });
+    const body = { assetId, side: "BUY", quantity: "1", idempotencyKey: "00000000-0000-4000-8000-000000000123" };
+    const responses = await Promise.all([1, 2].map(() => trade(authenticated("http://localhost/api/trades", cookie, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }))));
+    const projections = await Promise.all(responses.map((response) => response.json()));
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(projections[0]).toEqual(projections[1]);
+    expect((await prisma.player.findUniqueOrThrow({ where: { walletAddress: account.address } })).cash.toString()).toBe("0");
+    expect(await prisma.transaction.count({ where: { walletAddress: account.address } })).toBe(1);
+  });
+
+  it("keeps replay stable after a later trade and rejects a mismatched command", async () => {
+    await prisma.player.create({ data: { walletAddress: account.address, cash: new Prisma.Decimal(100), lastLoginAt: new Date() } });
+    const first = { assetId, side: "BUY", quantity: "1", idempotencyKey: "00000000-0000-4000-8000-000000000124" };
+    const originalResponse = await trade(authenticated("http://localhost/api/trades", cookie, { method: "POST", body: JSON.stringify(first) }));
+    const original = await originalResponse.json();
+    await prisma.assetQuote.update({ where: { assetId }, data: { nativePrice: new Prisma.Decimal(10), usdPrice: new Prisma.Decimal(10) } });
+    await trade(authenticated("http://localhost/api/trades", cookie, {
+      method: "POST",
+      body: JSON.stringify({ assetId, side: "SELL", quantity: "1", idempotencyKey: "00000000-0000-4000-8000-000000000125" }),
+    }));
+
+    const replay = await trade(authenticated("http://localhost/api/trades", cookie, { method: "POST", body: JSON.stringify(first) }));
+    expect(await replay.json()).toEqual(original);
+    const mismatch = await trade(authenticated("http://localhost/api/trades", cookie, {
+      method: "POST",
+      body: JSON.stringify({ ...first, quantity: "MAX" }),
+    }));
+    expect(mismatch.status).toBe(422);
+    expect((await mismatch.json()).error.code).toBe("IDEMPOTENCY_KEY_REUSED");
   });
 
   it("reset preserves the prior ledger rows and exposes them through history", async () => {

@@ -49,6 +49,14 @@ pnpm test
 pnpm build
 ```
 
+另外单独运行数据库集成验证。此命令自行创建干净的本地一次性 PostgreSQL 容器，应用迁移，
+连续执行两次种子以验证幂等性，串行运行数据库测试，并在结束时删除容器；它不会读取或连接生产
+`DATABASE_URL`：
+
+```bash
+pnpm test:integration
+```
+
 部署后用只读 SQL 检查资产报价数、逐日价格数和交易账本。以下命令读取当前环境的
 `DATABASE_URL`，不会修改数据：
 

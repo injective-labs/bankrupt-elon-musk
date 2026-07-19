@@ -6,15 +6,17 @@ Complete.
 
 ## Implementation
 
-- Consolidated disposable PostgreSQL coverage under `tests/integration/`.
+- Consolidated disposable PostgreSQL coverage under `tests/integration/` and added `pnpm test:integration` as its safe entry point.
+- The runner always creates a clean PostgreSQL 16 Docker container on a random localhost port, replaces any inherited database URL with its guarded integration-only URL, applies migrations, seeds twice, runs files serially, and removes the container.
 - Added authenticated end-to-end coverage for migration state and the exact 160-asset seed, one-time wallet funding, cash preservation on repeat login, atomic trade commit, forced ledger-insert rollback, database-backed reload, reset ledger preservation/history, and server-computed leaderboard P&L.
-- Added post-launch market persistence coverage proving that no historical rows are backfilled and that an older refresh cannot create an older daily row after rollout.
+- Added clean-seed coverage proving 160 assets and zero daily rows after two seed runs, plus post-launch persistence coverage proving strict older-row rejection and same-date stale-run protection.
+- Restored concurrency regressions for simultaneous overspend, same-key replay with one debit/ledger, and stable replay plus command-mismatch rejection after a later trade.
 - Replaced `.env.example` values with safe variable names only.
 - Updated deployment, read-only inspection, reset-disablement, and application-only rollback documentation.
 
 ## TDD Evidence
 
-The first focused run against the isolated `injpass-task11-pg` PostgreSQL 16 container failed all six game-flow cases because the test referenced a non-seeded asset. After changing the fixture to the seeded `bitcoin-coin` asset, the remaining login test failed because the nonce route contract requires a JSON POST body. Correcting that route request made the focused integration run pass: 2 files, 8 tests.
+The initial Task 11 cycle exposed fixture errors before reaching green. The findings follow-up then reproduced the missing runner with `pnpm test:integration`, which failed because the command did not exist. After adding the guarded runner/config and restored cases, a fresh runner invocation passed migrations, two seeds, and 12 serial integration tests.
 
 ## Verification
 
@@ -22,7 +24,8 @@ All commands used the isolated database at `localhost:55432`; no Supabase instan
 
 - `pnpm prisma validate` — passed.
 - `pnpm prisma generate` — passed.
-- `RUN_DATABASE_TESTS=1 pnpm test` — 29 files passed, 183 tests passed.
+- `pnpm test:integration` — 2 files passed, 12 tests passed against a fresh disposable container.
+- `pnpm test` — 27 files passed and 2 database files skipped as designed; 175 tests passed and 12 skipped.
 - `pnpm typecheck` — passed.
 - `pnpm build` — passed.
 - `git diff --check` — passed.
@@ -31,4 +34,4 @@ All commands used the isolated database at `localhost:55432`; no Supabase instan
 
 - Prisma reports that the `package.json#prisma` configuration will be removed in Prisma 7.
 - Next build reports that `baseline-browser-mapping` data is more than two months old.
-- Database integration tests remain opt-in through `RUN_DATABASE_TESTS=1` so the default suite does not require PostgreSQL; CI should provision a disposable database, migrate and seed it, and set that flag.
+- Docker must be available to run `pnpm test:integration`; the default test suite remains database-independent.

@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { prisma } from "@/server/db";
 import { persistDailyBarIfCurrent } from "@/server/market/refresh";
@@ -9,7 +9,7 @@ const assetId = "task-11-refresh-asset";
 const rolloutDate = new Date("2026-07-20T00:00:00Z");
 
 describeDatabase("post-launch market refresh persistence (PostgreSQL)", () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
     await prisma.asset.deleteMany({ where: { id: assetId } });
     await prisma.asset.create({
       data: {
@@ -51,6 +51,15 @@ describeDatabase("post-launch market refresh persistence (PostgreSQL)", () => {
     const asset = { id: assetId, quoteSymbol: "T11-USD", currency: "USD", quoteMultiplier: new Prisma.Decimal(1) };
     await persistDailyBarIfCurrent(asset, {
       symbol: asset.quoteSymbol,
+      marketDate: rolloutDate,
+      open: 100,
+      high: 101,
+      low: 99,
+      close: 100,
+      currency: "USD",
+    }, new Prisma.Decimal(1), new Date("2026-07-20T14:00:00Z"));
+    await persistDailyBarIfCurrent(asset, {
+      symbol: asset.quoteSymbol,
       marketDate: new Date("2026-07-19T00:00:00Z"),
       open: 90,
       high: 91,
@@ -61,5 +70,27 @@ describeDatabase("post-launch market refresh persistence (PostgreSQL)", () => {
 
     expect(await prisma.assetDailyPrice.findMany({ where: { assetId }, select: { marketDate: true } }))
       .toEqual([{ marketDate: rolloutDate }]);
+  });
+
+  it("keeps a newer run when an older run returns the same market date", async () => {
+    const asset = { id: assetId, quoteSymbol: "T11-USD", currency: "USD", quoteMultiplier: new Prisma.Decimal(1) };
+    const bar = (close: number) => ({
+      symbol: asset.quoteSymbol,
+      marketDate: rolloutDate,
+      open: close,
+      high: close,
+      low: close,
+      close,
+      currency: "USD",
+    });
+    await persistDailyBarIfCurrent(asset, bar(220), new Prisma.Decimal("1.01"), new Date("2026-07-20T15:00:00Z"));
+    await persistDailyBarIfCurrent(asset, bar(180), new Prisma.Decimal("0.99"), new Date("2026-07-20T14:00:00Z"));
+
+    const quote = await prisma.assetQuote.findUniqueOrThrow({ where: { assetId } });
+    const daily = await prisma.assetDailyPrice.findUniqueOrThrow({ where: { assetId_marketDate: { assetId, marketDate: rolloutDate } } });
+    expect(quote.nativePrice.toString()).toBe("220");
+    expect(quote.fetchedAt).toEqual(new Date("2026-07-20T15:00:00Z"));
+    expect(daily.close.toString()).toBe("220");
+    expect(daily.fetchedAt).toEqual(new Date("2026-07-20T15:00:00Z"));
   });
 });
