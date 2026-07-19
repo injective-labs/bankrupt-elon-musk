@@ -60,8 +60,14 @@ export async function verifyAndIssueToken(
   }
   if (!ok) return null;
 
-  // One-time use: consume the nonce.
-  await prisma.authNonce.delete({ where: { walletAddress: wallet } }).catch(() => {});
+  const consumed = await prisma.authNonce.deleteMany({
+    where: {
+      walletAddress: wallet,
+      nonce: record.nonce,
+      expiresAt: { gt: new Date() },
+    },
+  });
+  if (consumed.count !== 1) return null;
 
   return new SignJWT({})
     .setProtectedHeader({ alg: "HS256" })

@@ -84,3 +84,58 @@ Results before commit:
 
 - The existing client still expects the legacy token-shaped verify response and bearer-oriented state APIs. The brief explicitly prohibited unrelated downstream game UI changes; wiring the client and converting private game handlers belongs to the later task that adopts `authenticateRequest()`.
 - Secure cookies are intentionally always enabled, satisfying production hardening and the route contract. Plain HTTP local browser testing therefore needs HTTPS or an environment-specific proxy; automated route tests are unaffected.
+
+## Follow-up security review fixes
+
+Review identified five gaps after the initial commit. They were addressed test-first in a follow-up change.
+
+### Follow-up RED evidence
+
+The focused command was:
+
+```text
+pnpm exec vitest run app/api/state/route.test.ts src/server/auth.test.ts src/server/http/sessionCookie.test.ts src/server/http/errors.test.ts
+```
+
+The first behavior run produced 7 expected failures:
+
+- Legacy state GET returned 200 instead of 503 and PUT returned 400 instead of 503.
+- Concurrent signed nonce replay reached the old unconditional `delete` path rather than conditional `deleteMany`.
+- A nonce deletion failure was swallowed instead of propagated.
+- Development and test cookies incorrectly contained `Secure`.
+- `ApiError.details` was serialized into the public response.
+
+### Follow-up GREEN changes
+
+- Retired both GET and PUT `/api/state` paths with a fixed 503 `GAME_STATE_API_RETIRED` response. The route no longer imports wallet, game-state, or database persistence code.
+- Changed nonce consumption to conditional `deleteMany` over checksum wallet, exact nonce, and `expiresAt > now`; JWT issuance occurs only for `count === 1`, and deletion errors propagate.
+- Made cookie `secure` dynamic: true only for `NODE_ENV=production`, false for test/development. Other attributes remain HttpOnly, SameSite=Lax, and Path=/.
+- Removed `ApiError.details` from public serialization while retaining typed code/message responses.
+- Added real cryptographic coverage using a viem private-key account and signature, real JOSE tokens for expiry and wrong-secret rejection, actual cookie parsing, and checksum normalization.
+- Preserved the existing account service seam tests proving atomic upsert, create-only starting cash, and no cash mutation on returning login.
+
+Focused follow-up result:
+
+```text
+Test Files 5 passed (5)
+Tests 15 passed (15)
+```
+
+### Follow-up full verification
+
+```text
+git diff --check
+pnpm test
+pnpm typecheck
+```
+
+Results:
+
+- Diff check clean.
+- Full suite: 9 test files passed, 26 tests passed.
+- TypeScript: `tsc --noEmit` exited successfully.
+
+### Updated concern
+
+- The prior note that cookies were always Secure is superseded: Secure is now production-only, so local HTTP development works while production remains hardened.
+- Legacy state synchronization now receives an intentional 503 until the authenticated authoritative game APIs replace it; this closes the unauthenticated overwrite window rather than retaining insecure compatibility.

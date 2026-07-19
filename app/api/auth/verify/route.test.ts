@@ -44,7 +44,7 @@ describe("wallet authentication routes", () => {
     expect(cookie).toContain("musk_session=signed.jwt");
     expect(cookie).toContain("Path=/");
     expect(cookie).toContain("HttpOnly");
-    expect(cookie).toContain("Secure");
+    expect(cookie).not.toContain("Secure");
     expect(cookie.toLowerCase()).toContain("samesite=lax");
   });
 

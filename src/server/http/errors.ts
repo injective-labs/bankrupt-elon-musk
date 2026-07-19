@@ -19,7 +19,6 @@ export function toErrorResponse(error: unknown): NextResponse {
         error: {
           code: error.code,
           message: error.message,
-          ...(error.details === undefined ? {} : { details: error.details }),
         },
       },
       { status: error.status },
