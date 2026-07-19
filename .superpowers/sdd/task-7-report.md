@@ -56,4 +56,28 @@ Implemented an environment-gated, authenticated, serializable, and idempotent ac
 - `pnpm build`: production build completed and generated `/api/game/reset`; exit 0.
 - `git diff --check`: exit 0.
 
-The earlier aggregate-scalar concern is resolved: the scalar position fields are now zero/not-applicable, while `positionsBefore` provides the lossless per-asset audit record.
+The earlier aggregate-scalar concern was superseded by the final follow-up below; `positionsBefore` remains the lossless per-asset audit record.
+
+## Final review follow-up: nullable fields and bounded audit parsing
+
+### RED evidence
+
+- The ledger assertion failed because RESET still wrote Decimal zero into asset-specific quantity and cost-basis columns instead of SQL null.
+- Boundary cases showed that negative values, precision/scale overflow, empty or oversized asset IDs, duplicate/out-of-order assets, and audits larger than the 160-item catalogue limit were accepted.
+- A valid BUY command found under the same wallet/idempotency key returned the internal malformed-reset error instead of the public key-reuse error.
+
+### Changes
+
+- RESET now writes null for all four asset-specific quantity/cost-basis before/after fields.
+- `positionsBefore` parsing fails closed above 160 items. Asset IDs must be nonempty, at most 128 characters, unique, and strictly ascending.
+- Quantity and cost-basis strings must be canonical fixed decimal notation, nonnegative, and fit their exact `Decimal(30,12)` and `Decimal(30,8)` integer/scale bounds. Exponents, NaN, signs, leading zeros, redundant trailing fractional zeros, overflows, and excessive scales are rejected.
+- Generated audits are explicitly sorted by asset ID and serialized with canonical fixed notation before the same validator accepts them.
+- Replay classifies structurally valid BUY/SELL commands and other non-RESET command kinds as 422 `IDEMPOTENCY_KEY_REUSED` before RESET parsing. A differing idempotency identity also returns 422; malformed snapshots that claim to be RESET continue to fail closed with 500 `INVALID_RESET_SNAPSHOT`. The same behavior applies after an exact-key P2002 race.
+
+### Fresh final verification
+
+- Focused reset service/route suite: 32/32 passed.
+- Full suite: 138 passed, 5 opt-in tests skipped.
+- `pnpm typecheck`: exit 0.
+- `pnpm build`: production build completed successfully, including `/api/game/reset`.
+- `git diff --check`: exit 0.

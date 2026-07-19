@@ -5,6 +5,8 @@ import { prisma } from "./db";
 import { ApiError } from "./http/errors";
 
 const MAX_ATTEMPTS = 3;
+const MAX_AUDIT_POSITIONS = 160;
+const MAX_ASSET_ID_LENGTH = 128;
 
 interface ResetCommand {
   kind: "RESET";
@@ -28,16 +30,44 @@ function idempotencyConflict(error: unknown): boolean {
     || (Array.isArray(meta.target) && meta.target.length === 2 && meta.target[0] === "walletAddress" && meta.target[1] === "idempotencyKey");
 }
 
+function isTradeCommand(value: unknown): boolean {
+  return isRecord(value) && typeof value.assetId === "string" && value.assetId.length > 0
+    && (value.side === "BUY" || value.side === "SELL")
+    && typeof value.quantity === "string" && typeof value.idempotencyKey === "string";
+}
+
+function canonicalPositionDecimal(value: unknown, integerDigits: number, scale: number): value is string {
+  if (typeof value !== "string") return false;
+  const match = /^(0|[1-9]\d*)(?:\.(\d*[1-9]))?$/.exec(value);
+  if (!match) return false;
+  return match[1].length <= integerDigits && (match[2]?.length ?? 0) <= scale;
+}
+
+function positionsAudit(value: unknown): ResetCommand["positionsBefore"] {
+  if (!Array.isArray(value) || value.length > MAX_AUDIT_POSITIONS) {
+    throw new ApiError(500, "INVALID_RESET_SNAPSHOT", "Stored reset command is invalid");
+  }
+  let previous: string | null = null;
+  return value.map((position) => {
+    if (!isRecord(position) || typeof position.assetId !== "string" || position.assetId.length === 0 || position.assetId.length > MAX_ASSET_ID_LENGTH
+      || previous !== null && position.assetId <= previous
+      || !canonicalPositionDecimal(position.quantity, 18, 12)
+      || !canonicalPositionDecimal(position.costBasis, 22, 8)) {
+      throw new ApiError(500, "INVALID_RESET_SNAPSHOT", "Stored reset command is invalid");
+    }
+    previous = position.assetId;
+    return { assetId: position.assetId, quantity: position.quantity, costBasis: position.costBasis };
+  });
+}
+
 function storedCommand(value: unknown): ResetCommand {
+  if (isTradeCommand(value) || (isRecord(value) && typeof value.kind === "string" && value.kind !== "RESET")) {
+    throw new ApiError(422, "IDEMPOTENCY_KEY_REUSED", "Idempotency key was already used for another command");
+  }
   if (!isRecord(value) || value.kind !== "RESET" || value.version !== 1 || typeof value.idempotencyKey !== "string" || !Array.isArray(value.positionsBefore)) {
     throw new ApiError(500, "INVALID_RESET_SNAPSHOT", "Stored reset command is invalid");
   }
-  const positionsBefore = value.positionsBefore.map((position) => {
-    if (!isRecord(position) || typeof position.assetId !== "string" || !isDecimalString(position.quantity) || !isDecimalString(position.costBasis)) {
-      throw new ApiError(500, "INVALID_RESET_SNAPSHOT", "Stored reset command is invalid");
-    }
-    return { assetId: position.assetId, quantity: position.quantity, costBasis: position.costBasis };
-  });
+  const positionsBefore = positionsAudit(value.positionsBefore);
   return { kind: "RESET", version: 1, idempotencyKey: value.idempotencyKey, positionsBefore };
 }
 
@@ -96,7 +126,10 @@ export async function resetAccount(walletAddress: string, idempotencyKey: string
         ]);
         if (!player) throw new ApiError(404, "PLAYER_NOT_FOUND", "Player not found");
 
-        const command: ResetCommand = { kind: "RESET", version: 1, idempotencyKey, positionsBefore: positions.map((position) => ({ assetId: position.assetId, quantity: position.quantity.toFixed(), costBasis: position.costBasis.toFixed() })) };
+        const positionsBefore = positionsAudit(positions
+          .map((position) => ({ assetId: position.assetId, quantity: position.quantity.toFixed(), costBasis: position.costBasis.toFixed() }))
+          .sort((left, right) => left.assetId < right.assetId ? -1 : left.assetId > right.assetId ? 1 : 0));
+        const command: ResetCommand = { kind: "RESET", version: 1, idempotencyKey, positionsBefore };
         await tx.position.deleteMany({ where: { walletAddress } });
         await tx.player.update({ where: { walletAddress }, data: { cash: STARTING_CASH } });
         const ledger = await tx.transaction.create({
@@ -105,8 +138,8 @@ export async function resetAccount(walletAddress: string, idempotencyKey: string
             commandSnapshot: command as unknown as Prisma.InputJsonValue,
             resultSnapshot: {}, usdAmount: new Prisma.Decimal(0),
             cashBefore: player.cash, cashAfter: STARTING_CASH,
-            quantityBefore: new Prisma.Decimal(0), quantityAfter: new Prisma.Decimal(0),
-            costBasisBefore: new Prisma.Decimal(0), costBasisAfter: new Prisma.Decimal(0),
+            quantityBefore: null, quantityAfter: null,
+            costBasisBefore: null, costBasisAfter: null,
           },
           select: { id: true },
         });

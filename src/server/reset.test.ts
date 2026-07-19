@@ -63,6 +63,7 @@ describe("resetAccount", () => {
   });
 
   it("atomically deletes positions, restores USD 50B, and appends a RESET ledger snapshot", async () => {
+    mocks.positions.mockResolvedValue([...audit].reverse().map((position) => ({ assetId: position.assetId, quantity: d(position.quantity), costBasis: d(position.costBasis) })));
     const result = await resetAccount(wallet, key);
     expect(mocks.positionDeleteMany).toHaveBeenCalledWith({ where: { walletAddress: wallet } });
     expect(mocks.playerUpdate).toHaveBeenCalledWith({ where: { walletAddress: wallet }, data: { cash: d("50000000000") } });
@@ -70,7 +71,7 @@ describe("resetAccount", () => {
       walletAddress: wallet, idempotencyKey: key, type: "RESET", assetId: null,
       commandSnapshot: storedCommand, resultSnapshot: {},
       usdAmount: d("0"), cashBefore: d("123"), cashAfter: d("50000000000"),
-      quantityBefore: d("0"), quantityAfter: d("0"), costBasisBefore: d("0"), costBasisAfter: d("0"),
+      quantityBefore: null, quantityAfter: null, costBasisBefore: null, costBasisAfter: null,
     }), select: { id: true } });
     expect(mocks.transactionUpdate).toHaveBeenCalledWith({ where: { id: 9n }, data: { resultSnapshot: projection } });
     expect(result).toEqual(projection);
@@ -86,10 +87,47 @@ describe("resetAccount", () => {
   });
 
   it("rejects malformed persisted reset command and result snapshots", async () => {
-    mocks.transactionFind.mockResolvedValue({ commandSnapshot: { type: "BUY", idempotencyKey: key }, resultSnapshot: projection });
+    mocks.transactionFind.mockResolvedValue({ commandSnapshot: { kind: "RESET", version: 1, idempotencyKey: key, positionsBefore: [{ assetId: "a", quantity: "NaN", costBasis: "1" }] }, resultSnapshot: projection });
     await expect(resetAccount(wallet, key)).rejects.toMatchObject({ status: 500, code: "INVALID_RESET_SNAPSHOT" });
     mocks.transactionFind.mockResolvedValue({ commandSnapshot: storedCommand, resultSnapshot: { ...projection, cash: "NaN" } });
     await expect(resetAccount(wallet, key)).rejects.toMatchObject({ status: 500, code: "INVALID_RESET_SNAPSHOT" });
+  });
+
+  it.each([
+    ["exponent", [{ assetId: "a", quantity: "1e2", costBasis: "1" }]],
+    ["leading zero", [{ assetId: "a", quantity: "01", costBasis: "1" }]],
+    ["trailing fractional zero", [{ assetId: "a", quantity: "1.0", costBasis: "1" }]],
+    ["negative", [{ assetId: "a", quantity: "-1", costBasis: "1" }]],
+    ["quantity overflow", [{ assetId: "a", quantity: "1000000000000000000", costBasis: "1" }]],
+    ["quantity scale overflow", [{ assetId: "a", quantity: "0.0000000000001", costBasis: "1" }]],
+    ["cost overflow", [{ assetId: "a", quantity: "1", costBasis: "10000000000000000000000" }]],
+    ["cost scale overflow", [{ assetId: "a", quantity: "1", costBasis: "0.000000001" }]],
+    ["empty asset", [{ assetId: "", quantity: "1", costBasis: "1" }]],
+    ["long asset", [{ assetId: "a".repeat(129), quantity: "1", costBasis: "1" }]],
+    ["duplicate", [{ assetId: "a", quantity: "1", costBasis: "1" }, { assetId: "a", quantity: "2", costBasis: "2" }]],
+    ["out of order", [{ assetId: "b", quantity: "1", costBasis: "1" }, { assetId: "a", quantity: "2", costBasis: "2" }]],
+    ["oversize", Array.from({ length: 161 }, (_, index) => ({ assetId: String(index).padStart(3, "0"), quantity: "1", costBasis: "1" }))],
+  ])("fails closed for an invalid %s positionsBefore audit", async (_name, positionsBefore) => {
+    mocks.transactionFind.mockResolvedValue({ commandSnapshot: { kind: "RESET", version: 1, idempotencyKey: key, positionsBefore }, resultSnapshot: projection });
+    await expect(resetAccount(wallet, key)).rejects.toMatchObject({ status: 500, code: "INVALID_RESET_SNAPSHOT" });
+  });
+
+  it("classifies a valid trade command using the reset key as key reuse", async () => {
+    const trade = { assetId: "stock", side: "BUY", quantity: "1", idempotencyKey: key };
+    mocks.transactionFind.mockResolvedValue({ commandSnapshot: trade, resultSnapshot: projection });
+    await expect(resetAccount(wallet, key)).rejects.toMatchObject({ status: 422, code: "IDEMPOTENCY_KEY_REUSED" });
+
+    mocks.transaction.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002", meta: { target: ["walletAddress", "idempotencyKey"] } }));
+    mocks.replayFind.mockResolvedValue({ commandSnapshot: trade, resultSnapshot: projection });
+    await expect(resetAccount(wallet, key)).rejects.toMatchObject({ status: 422, code: "IDEMPOTENCY_KEY_REUSED" });
+  });
+
+  it.each([
+    { kind: "OTHER", version: 1, idempotencyKey: key },
+    { ...storedCommand, idempotencyKey: "00000000-0000-4000-8000-000000000099" },
+  ])("classifies a different valid command identity as key reuse", async (commandSnapshot) => {
+    mocks.transactionFind.mockResolvedValue({ commandSnapshot, resultSnapshot: projection });
+    await expect(resetAccount(wallet, key)).rejects.toMatchObject({ status: 422, code: "IDEMPOTENCY_KEY_REUSED" });
   });
 
   it.each([
