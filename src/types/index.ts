@@ -6,6 +6,69 @@ export type SortMode = "price-asc" | "price-desc" | "owned";
 
 export type SoundKind = "buy" | "largeBuy" | "refund" | "error" | "chaos" | "reset";
 
+/** Exact base-10 value serialized at an API boundary. */
+export type DecimalString = string;
+
+export type QuoteStatus = "ACTIVE" | "STALE" | "ERROR" | "MISSING";
+
+export interface AssetView {
+  id: string;
+  name: string;
+  nameEn?: string | null;
+  category: string;
+  subCategory?: string | null;
+  ticker: string;
+  currency: string;
+  unit: string;
+  unitEn?: string | null;
+  enabled: boolean;
+  displayOrder: number;
+  usdPrice: DecimalString | null;
+  marketDate: string | null;
+  quoteStatus: QuoteStatus;
+}
+
+export interface PositionView {
+  assetId: string;
+  quantity: DecimalString;
+  costBasis: DecimalString;
+  marketValue: DecimalString | null;
+  unrealizedPnl: DecimalString | null;
+}
+
+export interface TransactionView {
+  id: string;
+  type: "BUY" | "SELL" | "RESET";
+  assetId: string | null;
+  quantity: DecimalString | null;
+  usdUnitPrice: DecimalString | null;
+  usdAmount: DecimalString;
+  createdAt: string;
+}
+
+export interface AccountProjection {
+  walletAddress: string;
+  walletName?: string | null;
+  cash: DecimalString;
+  holdingsValue: DecimalString;
+  netWorth: DecimalString;
+  pnl: DecimalString;
+  positions: PositionView[];
+  assets: AssetView[];
+  recentTransactions: TransactionView[];
+  marketAsOf: string | null;
+  settlementLocked: boolean;
+  updatedAt: string;
+}
+
+export interface ApiErrorBody {
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+}
+
 export interface Product {
   id: string;
   name: string;
