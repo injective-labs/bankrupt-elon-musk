@@ -7,8 +7,10 @@ import { ApiError } from "./http/errors";
 const MAX_ATTEMPTS = 3;
 
 interface ResetCommand {
-  type: "RESET";
+  kind: "RESET";
+  version: 1;
   idempotencyKey: string;
+  positionsBefore: Array<{ assetId: string; quantity: string; costBasis: string }>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -27,17 +29,23 @@ function idempotencyConflict(error: unknown): boolean {
 }
 
 function storedCommand(value: unknown): ResetCommand {
-  if (!isRecord(value) || value.type !== "RESET" || typeof value.idempotencyKey !== "string") {
+  if (!isRecord(value) || value.kind !== "RESET" || value.version !== 1 || typeof value.idempotencyKey !== "string" || !Array.isArray(value.positionsBefore)) {
     throw new ApiError(500, "INVALID_RESET_SNAPSHOT", "Stored reset command is invalid");
   }
-  return { type: "RESET", idempotencyKey: value.idempotencyKey };
+  const positionsBefore = value.positionsBefore.map((position) => {
+    if (!isRecord(position) || typeof position.assetId !== "string" || !isDecimalString(position.quantity) || !isDecimalString(position.costBasis)) {
+      throw new ApiError(500, "INVALID_RESET_SNAPSHOT", "Stored reset command is invalid");
+    }
+    return { assetId: position.assetId, quantity: position.quantity, costBasis: position.costBasis };
+  });
+  return { kind: "RESET", version: 1, idempotencyKey: value.idempotencyKey, positionsBefore };
 }
 
 function isOptionalString(value: unknown): boolean { return value === undefined || value === null || typeof value === "string"; }
 function isDecimalString(value: unknown): value is string { return typeof value === "string" && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value); }
 function isDateString(value: unknown): value is string { return typeof value === "string" && Number.isFinite(Date.parse(value)); }
 
-function projectionSnapshot(value: unknown): AccountProjection {
+function projectionSnapshot(value: unknown, walletAddress: string): AccountProjection {
   if (!isRecord(value)
     || typeof value.walletAddress !== "string"
     || !(value.walletName === null || typeof value.walletName === "string")
@@ -49,43 +57,46 @@ function projectionSnapshot(value: unknown): AccountProjection {
   }
   const validPositions = value.positions.every((item) => isRecord(item) && typeof item.assetId === "string" && isDecimalString(item.quantity) && isDecimalString(item.costBasis) && (item.marketValue === null || isDecimalString(item.marketValue)) && (item.unrealizedPnl === null || isDecimalString(item.unrealizedPnl)));
   const validAssets = value.assets.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string" && isOptionalString(item.nameEn) && typeof item.category === "string" && isOptionalString(item.subCategory) && typeof item.ticker === "string" && typeof item.currency === "string" && typeof item.unit === "string" && isOptionalString(item.unitEn) && typeof item.enabled === "boolean" && Number.isInteger(item.displayOrder) && (item.usdPrice === null || isDecimalString(item.usdPrice)) && (item.marketDate === null || isDateString(item.marketDate)) && ["ACTIVE", "STALE", "ERROR", "MISSING"].includes(String(item.quoteStatus)));
-  const validTransactions = value.recentTransactions.every((item) => isRecord(item) && /^\d+$/.test(String(item.id)) && ["BUY", "SELL", "RESET"].includes(String(item.type)) && (item.assetId === null || typeof item.assetId === "string") && (item.quantity === null || isDecimalString(item.quantity)) && (item.usdUnitPrice === null || isDecimalString(item.usdUnitPrice)) && isDecimalString(item.usdAmount) && isDateString(item.createdAt));
-  if (!validPositions || !validAssets || !validTransactions) {
+  const validTransactions = value.recentTransactions.every((item) => isRecord(item) && /^\d+$/.test(String(item.id)) && ["BUY", "SELL", "RESET"].includes(String(item.type)) && (item.assetId === null || typeof item.assetId === "string") && (item.quantity === null || isDecimalString(item.quantity)) && (item.usdUnitPrice === null || isDecimalString(item.usdUnitPrice)) && isDecimalString(item.usdAmount) && isDateString(item.createdAt) && (item.type !== "RESET" || (item.assetId === null && item.cashAfter === STARTING_CASH.toString())));
+  const resetState = value.walletAddress === walletAddress
+    && value.cash === STARTING_CASH.toString()
+    && value.positions.length === 0
+    && value.holdingsValue === "0"
+    && value.netWorth === STARTING_CASH.toString()
+    && value.pnl === "0";
+  if (!validPositions || !validAssets || !validTransactions || !resetState) {
     throw new ApiError(500, "INVALID_RESET_SNAPSHOT", "Stored reset result is invalid");
   }
   return value as unknown as AccountProjection;
 }
 
-function replay(row: { commandSnapshot: Prisma.JsonValue; resultSnapshot: Prisma.JsonValue }, command: ResetCommand): AccountProjection {
+function replay(row: { commandSnapshot: Prisma.JsonValue; resultSnapshot: Prisma.JsonValue }, walletAddress: string, idempotencyKey: string): AccountProjection {
   const original = storedCommand(row.commandSnapshot);
-  if (original.idempotencyKey !== command.idempotencyKey) {
+  if (original.idempotencyKey !== idempotencyKey) {
     throw new ApiError(422, "IDEMPOTENCY_KEY_REUSED", "Idempotency key was already used for another command");
   }
-  return projectionSnapshot(row.resultSnapshot);
+  return projectionSnapshot(row.resultSnapshot, walletAddress);
 }
 
 export async function resetAccount(walletAddress: string, idempotencyKey: string): Promise<AccountProjection> {
   if (process.env.ENABLE_GAME_RESET !== "true") {
     throw new ApiError(403, "RESET_DISABLED", "Game reset is disabled");
   }
-  const command: ResetCommand = { type: "RESET", idempotencyKey };
-
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
       return await prisma.$transaction(async (tx) => {
         const duplicate = await tx.transaction.findUnique({
           where: { walletAddress_idempotencyKey: { walletAddress, idempotencyKey } },
         });
-        if (duplicate) return replay(duplicate, command);
+        if (duplicate) return replay(duplicate, walletAddress, idempotencyKey);
 
         const [player, positions] = await Promise.all([
           tx.player.findUnique({ where: { walletAddress } }),
-          tx.position.findMany({ where: { walletAddress }, select: { quantity: true, costBasis: true } }),
+          tx.position.findMany({ where: { walletAddress }, select: { assetId: true, quantity: true, costBasis: true }, orderBy: { assetId: "asc" } }),
         ]);
         if (!player) throw new ApiError(404, "PLAYER_NOT_FOUND", "Player not found");
 
-        const quantityBefore = positions.reduce((total, position) => total.add(position.quantity), new Prisma.Decimal(0));
-        const costBasisBefore = positions.reduce((total, position) => total.add(position.costBasis), new Prisma.Decimal(0));
+        const command: ResetCommand = { kind: "RESET", version: 1, idempotencyKey, positionsBefore: positions.map((position) => ({ assetId: position.assetId, quantity: position.quantity.toFixed(), costBasis: position.costBasis.toFixed() })) };
         await tx.position.deleteMany({ where: { walletAddress } });
         await tx.player.update({ where: { walletAddress }, data: { cash: STARTING_CASH } });
         const ledger = await tx.transaction.create({
@@ -94,12 +105,18 @@ export async function resetAccount(walletAddress: string, idempotencyKey: string
             commandSnapshot: command as unknown as Prisma.InputJsonValue,
             resultSnapshot: {}, usdAmount: new Prisma.Decimal(0),
             cashBefore: player.cash, cashAfter: STARTING_CASH,
-            quantityBefore, quantityAfter: new Prisma.Decimal(0),
-            costBasisBefore, costBasisAfter: new Prisma.Decimal(0),
+            quantityBefore: new Prisma.Decimal(0), quantityAfter: new Prisma.Decimal(0),
+            costBasisBefore: new Prisma.Decimal(0), costBasisAfter: new Prisma.Decimal(0),
           },
           select: { id: true },
         });
-        const snapshot = await getAccountProjectionInTransaction(tx, walletAddress);
+        const projection = await getAccountProjectionInTransaction(tx, walletAddress);
+        const snapshot = {
+          ...projection,
+          recentTransactions: projection.recentTransactions.map((transaction) => transaction.type === "RESET"
+            ? { ...transaction, cashAfter: STARTING_CASH.toString() }
+            : transaction),
+        };
         await tx.transaction.update({
           where: { id: ledger.id },
           data: { resultSnapshot: snapshot as unknown as Prisma.InputJsonValue },
@@ -112,7 +129,7 @@ export async function resetAccount(walletAddress: string, idempotencyKey: string
           where: { walletAddress_idempotencyKey: { walletAddress, idempotencyKey } },
         });
         if (!duplicate) throw new ApiError(409, "RESET_CONFLICT", "Concurrent idempotent reset could not be replayed");
-        return replay(duplicate, command);
+        return replay(duplicate, walletAddress, idempotencyKey);
       }
       if (!conflict(error)) throw error;
       if (attempt === MAX_ATTEMPTS) {
