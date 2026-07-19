@@ -1,9 +1,18 @@
+import { Prisma } from "@prisma/client";
 import type { LeaderboardRow, LeaderboardSnapshot } from "@/types";
 import { prisma } from "./db";
 import { STARTING_CASH } from "./account";
 import { ApiError } from "./http/errors";
 
-const MAX_QUOTE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+interface RankingRow {
+  walletAddress: string;
+  walletName: string | null;
+  netWorth: Prisma.Decimal;
+  pnl: Prisma.Decimal;
+  rank: bigint;
+  total: bigint;
+  topOrder: bigint;
+}
 
 function maskAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -13,45 +22,74 @@ export async function getLossLeaderboard(
   walletAddress: string | null,
   limit: number,
 ): Promise<LeaderboardSnapshot> {
-  const players = await prisma.player.findMany({
-    include: { positions: { include: { asset: { include: { quote: true } } } } },
-  });
-  const ranked = players.map((player) => {
-    let netWorth = player.cash;
-    for (const position of player.positions) {
-      const quote = position.asset.quote;
-      const quoteTooOld = quote
-        ? Date.now() - quote.marketDate.getTime() > MAX_QUOTE_AGE_MS
-        : false;
-      if ((!quote || quoteTooOld) && !position.quantity.isZero()) {
-        throw new ApiError(503, "MARKET_DATA_UNAVAILABLE", "Leaderboard market data is incomplete");
-      }
-      if (quote) {
-        netWorth = netWorth.add(position.quantity.mul(quote.usdPrice));
-      }
-    }
-    return { player, netWorth, pnl: netWorth.sub(STARTING_CASH) };
-  });
-  ranked.sort((left, right) => {
-    const pnlOrder = left.pnl.comparedTo(right.pnl);
-    return pnlOrder || left.player.walletAddress.localeCompare(right.player.walletAddress);
-  });
   const boundedLimit = Math.max(0, Math.min(Math.trunc(limit), 100));
-  const top: LeaderboardRow[] = ranked.slice(0, boundedLimit).map(({ player, netWorth, pnl }) => ({
-    address: maskAddress(player.walletAddress),
-    walletName: player.walletName,
-    pnl: pnl.toString(),
-    netWorth: netWorth.toString(),
-    liquidated: false,
-  }));
-  const callerIndex = walletAddress
-    ? ranked.findIndex(({ player }) => player.walletAddress.toLowerCase() === walletAddress.toLowerCase())
-    : -1;
-  return {
-    top,
-    total: ranked.length,
-    you: callerIndex < 0
-      ? null
-      : { rank: callerIndex + 1, total: ranked.length, pnl: ranked[callerIndex].pnl.toString() },
-  };
+  return prisma.$transaction(async (tx) => {
+    const invalid = await tx.$queryRaw<Array<{ hasInvalidQuotes: boolean }>>(Prisma.sql`
+      SELECT EXISTS (
+        SELECT 1
+        FROM "Position" pos
+        LEFT JOIN "AssetQuote" quote ON quote."assetId" = pos."assetId"
+        WHERE pos."quantity" <> 0
+          AND (
+            quote."assetId" IS NULL
+            OR quote."status" <> 'ACTIVE'::"QuoteStatus"
+            OR quote."marketDate" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - INTERVAL '7 days'
+          )
+      ) AS "hasInvalidQuotes"
+    `);
+    if (invalid[0]?.hasInvalidQuotes) {
+      throw new ApiError(503, "MARKET_DATA_UNAVAILABLE", "Leaderboard market data is incomplete");
+    }
+
+    const rows = await tx.$queryRaw<RankingRow[]>(Prisma.sql`
+      WITH valuations AS (
+        SELECT
+          player."walletAddress",
+          player."walletName",
+          player."cash" + COALESCE(SUM(pos."quantity" * quote."usdPrice"), 0::numeric) AS "netWorth"
+        FROM "Player" player
+        LEFT JOIN "Position" pos ON pos."walletAddress" = player."walletAddress"
+        LEFT JOIN "AssetQuote" quote ON quote."assetId" = pos."assetId"
+        GROUP BY player."walletAddress", player."walletName", player."cash"
+      ), scored AS (
+        SELECT
+          valuations.*,
+          valuations."netWorth" - ${STARTING_CASH}::numeric AS pnl
+        FROM valuations
+      ), ranked AS (
+        SELECT
+          scored.*,
+          RANK() OVER (ORDER BY pnl ASC) AS rank,
+          ROW_NUMBER() OVER (ORDER BY pnl ASC, "walletAddress" ASC) AS "topOrder",
+          COUNT(*) OVER () AS total
+        FROM scored
+      )
+      SELECT "walletAddress", "walletName", "netWorth", pnl, rank, total, "topOrder"
+      FROM ranked
+      WHERE "topOrder" <= ${boundedLimit}
+         OR "walletAddress" = ${walletAddress}
+      ORDER BY "topOrder" ASC
+    `);
+
+    const total = rows.length ? Number(rows[0].total) : 0;
+    const top: LeaderboardRow[] = rows
+      .filter((row) => Number(row.topOrder) <= boundedLimit)
+      .map((row) => ({
+        address: maskAddress(row.walletAddress),
+        walletName: row.walletName,
+        pnl: row.pnl.toString(),
+        netWorth: row.netWorth.toString(),
+        liquidated: false,
+      }));
+    const caller = walletAddress
+      ? rows.find((row) => row.walletAddress.toLowerCase() === walletAddress.toLowerCase())
+      : undefined;
+    return {
+      top,
+      total,
+      you: caller
+        ? { rank: Number(caller.rank), total: Number(caller.total), pnl: caller.pnl.toString() }
+        : null,
+    };
+  }, { isolationLevel: "RepeatableRead" });
 }

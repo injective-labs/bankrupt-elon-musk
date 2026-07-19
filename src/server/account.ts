@@ -4,6 +4,7 @@ import type { AccountProjection, AssetView, PositionView, TransactionView } from
 import { isSettlementLocked } from "@/game/marketClock";
 import { prisma } from "./db";
 import { ApiError } from "./http/errors";
+import { isQuoteFresh } from "./quoteFreshness";
 
 export const STARTING_CASH = new Prisma.Decimal("50000000000");
 
@@ -32,32 +33,33 @@ export async function findPlayer(walletAddress: string): Promise<Player | null> 
   return prisma.player.findUnique({ where: { walletAddress } });
 }
 
-const MAX_QUOTE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
 function decimal(value: Prisma.Decimal): string {
   return value.toString();
 }
 
 export async function getAccountProjection(walletAddress: string): Promise<AccountProjection> {
-  const [player, assets, transactions] = await Promise.all([
-    prisma.player.findUnique({ where: { walletAddress }, include: { positions: true } }),
-    prisma.asset.findMany({
-      where: { enabled: true },
-      include: { quote: true },
-      orderBy: { displayOrder: "asc" },
-    }),
-    prisma.transaction.findMany({
-      where: { walletAddress },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    }),
-  ]);
+  const { player, assets, transactions } = await prisma.$transaction(async (tx) => {
+    const [snapshotPlayer, snapshotAssets, snapshotTransactions] = await Promise.all([
+      tx.player.findUnique({ where: { walletAddress }, include: { positions: true } }),
+      tx.asset.findMany({
+        where: { OR: [{ enabled: true }, { positions: { some: { walletAddress } } }] },
+        include: { quote: true },
+        orderBy: { displayOrder: "asc" },
+      }),
+      tx.transaction.findMany({
+        where: { walletAddress },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+    ]);
+    return { player: snapshotPlayer, assets: snapshotAssets, transactions: snapshotTransactions };
+  }, { isolationLevel: "RepeatableRead" });
   if (!player) throw new ApiError(404, "PLAYER_NOT_FOUND", "Player not found");
 
   const now = new Date();
   const assetViews: AssetView[] = assets.map((asset) => {
     const quote = asset.quote;
-    const tooOld = quote ? now.getTime() - quote.marketDate.getTime() > MAX_QUOTE_AGE_MS : false;
+    const tooOld = quote ? !isQuoteFresh(quote.marketDate, now) : false;
     return {
       id: asset.id,
       name: asset.nameZh,
@@ -75,6 +77,14 @@ export async function getAccountProjection(walletAddress: string): Promise<Accou
     };
   });
   const assetById = new Map(assetViews.map((asset) => [asset.id, asset]));
+  const invalidHeldAsset = player.positions.find((position) => {
+    if (position.quantity.isZero()) return false;
+    const asset = assetById.get(position.assetId);
+    return !asset || asset.quoteStatus !== "ACTIVE" || asset.usdPrice == null;
+  });
+  if (invalidHeldAsset) {
+    throw new ApiError(503, "MARKET_DATA_UNAVAILABLE", "Account market data is incomplete");
+  }
   let holdingsValue = new Prisma.Decimal(0);
   const positions: PositionView[] = player.positions
     .map((position) => {
