@@ -92,3 +92,10 @@ The build emitted only the existing Prisma 7 configuration deprecation and stale
 - USD amount, cash, and cost basis use one documented `ROUND_HALF_UP` policy to 8 decimals. The rounded amount is used consistently for affordability, balances, positions, ledger fields, and the in-transaction projection. Unit prices and rates retain their authoritative 12-decimal storage.
 - Tests prove `0.123456789 × 2` persists as `0.24691358`, cash as `99.75308642`, and partial average-cost reduction of `10 / 3` retains `6.66666667` instead of failing on repeating precision.
 - Snapshot validation now covers optional strings, plain decimal syntax, parseable dates, enum statuses/types, integer display order, and unsigned transaction IDs; malformed or legacy JSON fails closed.
+
+## Final critical follow-up: minimum rounded notional
+
+- RED: focused BUY and SELL tests at unit price `0.000000004999`, quantity one, both resolved and wrote despite HALF_UP producing a zero USD amount.
+- Fix: immediately after authoritative `price × quantity` is rounded to eight decimals, a non-positive result throws 422 `MINIMUM_NOTIONAL`, before any after-value calculation or database write.
+- Boundary GREEN: BUY and SELL at `0.000000004999` reject with no Player, Position, or Transaction write; both at exact threshold `0.000000005` succeed and ledger `usdAmount` is `0.00000001`.
+- Fresh verification: focused trade suite 34/34 passed; full suite 106 passed with 5 opt-in tests skipped; `git diff --check` and `pnpm typecheck` exited 0.

@@ -144,6 +144,20 @@ describe("executeTrade", () => {
     expect(mocks.positionUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { quantity: d("2"), costBasis: d("6.66666667") } }));
   });
 
+  it.each(["BUY", "SELL"] as const)("rejects a %s whose rounded USD amount is zero before writes", async (side) => {
+    mocks.asset.mockResolvedValue({ id: "stock", enabled: true, quote: { nativePrice: d("0.000000004999"), currency: "USD", fxRateToUsd: d("1"), usdPrice: d("0.000000004999"), marketDate: new Date("2026-07-18"), status: "ACTIVE" } });
+    if (side === "SELL") mocks.position.mockResolvedValue({ quantity: d("1"), costBasis: d("0.00000001") });
+    await expect(executeTrade(wallet, { ...command, side, quantity: "1" })).rejects.toMatchObject({ status: 422, code: "MINIMUM_NOTIONAL" });
+    expect(mocks.positionUpsert).not.toHaveBeenCalled(); expect(mocks.positionUpdate).not.toHaveBeenCalled(); expect(mocks.positionDelete).not.toHaveBeenCalled(); expect(mocks.playerUpdate).not.toHaveBeenCalled(); expect(mocks.transactionCreate).not.toHaveBeenCalled();
+  });
+
+  it.each(["BUY", "SELL"] as const)("rounds a %s at the minimum threshold to 0.00000001", async (side) => {
+    mocks.asset.mockResolvedValue({ id: "stock", enabled: true, quote: { nativePrice: d("0.000000005"), currency: "USD", fxRateToUsd: d("1"), usdPrice: d("0.000000005"), marketDate: new Date("2026-07-18"), status: "ACTIVE" } });
+    if (side === "SELL") mocks.position.mockResolvedValue({ quantity: d("1"), costBasis: d("0.00000001") });
+    await executeTrade(wallet, { ...command, side, quantity: "1" });
+    expect(mocks.transactionCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ usdAmount: d("0.00000001") }) }));
+  });
+
   it("computes and validates all after-values before any write", async () => {
     mocks.position.mockResolvedValue({ quantity: d("999999999999999999"), costBasis: d("1") });
     await expect(executeTrade(wallet, command)).rejects.toMatchObject({ code: "VALUE_OUT_OF_RANGE" });

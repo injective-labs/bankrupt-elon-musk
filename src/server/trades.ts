@@ -114,6 +114,9 @@ export async function executeTrade(walletAddress: string, command: TradeCommand)
         assertDecimal(quantity, MAX_QUANTITY, 12);
 
         const amount = money(price.mul(quantity));
+        if (!amount.gt(0)) {
+          throw new ApiError(422, "MINIMUM_NOTIONAL", "Trade amount is below the minimum supported USD value");
+        }
         const quantityBefore = position?.quantity ?? new Prisma.Decimal(0);
         const costBefore = position?.costBasis ?? new Prisma.Decimal(0);
         let cashAfter: Prisma.Decimal;
