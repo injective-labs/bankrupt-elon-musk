@@ -48,24 +48,25 @@ function challenge(value: unknown): { nonce: string; message: string } {
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const stringOrNull = (value: unknown): boolean => typeof value === "string" || value === null;
+const decimal = (value: unknown): value is string => typeof value === "string" && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value);
 
 function validPosition(value: unknown): boolean {
-  return record(value) && typeof value.assetId === "string" && typeof value.quantity === "string" && typeof value.costBasis === "string" && stringOrNull(value.marketValue) && stringOrNull(value.unrealizedPnl);
+  return record(value) && typeof value.assetId === "string" && decimal(value.quantity) && decimal(value.costBasis) && (value.marketValue === null || decimal(value.marketValue)) && (value.unrealizedPnl === null || decimal(value.unrealizedPnl));
 }
 
 function validAsset(value: unknown): boolean {
-  return record(value) && typeof value.id === "string" && typeof value.name === "string" && typeof value.category === "string" && typeof value.ticker === "string" && typeof value.currency === "string" && typeof value.unit === "string" && typeof value.enabled === "boolean" && typeof value.displayOrder === "number" && stringOrNull(value.usdPrice) && stringOrNull(value.marketDate) && ["ACTIVE", "STALE", "ERROR", "MISSING"].includes(String(value.quoteStatus));
+  return record(value) && typeof value.id === "string" && typeof value.name === "string" && typeof value.category === "string" && typeof value.ticker === "string" && typeof value.currency === "string" && typeof value.unit === "string" && typeof value.enabled === "boolean" && typeof value.displayOrder === "number" && (value.usdPrice === null || decimal(value.usdPrice)) && stringOrNull(value.marketDate) && ["ACTIVE", "STALE", "ERROR", "MISSING"].includes(String(value.quoteStatus));
 }
 
 function validTransaction(value: unknown): boolean {
-  return record(value) && typeof value.id === "string" && ["BUY", "SELL", "RESET"].includes(String(value.type)) && stringOrNull(value.assetId) && stringOrNull(value.quantity) && stringOrNull(value.usdUnitPrice) && typeof value.usdAmount === "string" && typeof value.createdAt === "string";
+  return record(value) && typeof value.id === "string" && ["BUY", "SELL", "RESET"].includes(String(value.type)) && stringOrNull(value.assetId) && (value.quantity === null || decimal(value.quantity)) && (value.usdUnitPrice === null || decimal(value.usdUnitPrice)) && decimal(value.usdAmount) && typeof value.createdAt === "string";
 }
 
 function account(value: unknown): AccountProjection {
   if (!value || typeof value !== "object") return invalidResponse("Account response is missing");
   const record = value as Record<string, unknown>;
   const decimals = ["cash", "holdingsValue", "netWorth", "pnl"];
-  if (typeof record.walletAddress !== "string" || decimals.some((key) => typeof record[key] !== "string") || !Array.isArray(record.positions) || !record.positions.every(validPosition) || !Array.isArray(record.assets) || !record.assets.every(validAsset) || !Array.isArray(record.recentTransactions) || !record.recentTransactions.every(validTransaction) || !stringOrNull(record.marketAsOf) || typeof record.updatedAt !== "string" || typeof record.settlementLocked !== "boolean") {
+  if (typeof record.walletAddress !== "string" || !(record.walletName === undefined || stringOrNull(record.walletName)) || decimals.some((key) => !decimal(record[key])) || !Array.isArray(record.positions) || !record.positions.every(validPosition) || !Array.isArray(record.assets) || !record.assets.every(validAsset) || !Array.isArray(record.recentTransactions) || !record.recentTransactions.every(validTransaction) || !stringOrNull(record.marketAsOf) || typeof record.updatedAt !== "string" || typeof record.settlementLocked !== "boolean") {
     return invalidResponse("Account response is malformed");
   }
   return value as AccountProjection;
@@ -90,17 +91,28 @@ export async function loginWithSignature(address: string, walletName: string | n
 }
 
 export async function logout(): Promise<void> {
-  await response<{ ok: true }>(fetch("/api/auth/logout", json("POST")));
+  const res = await fetch("/api/auth/logout", json("POST"));
+  if (res.status === 204) return;
+  const body = await response<unknown>(Promise.resolve(res));
+  if (!record(body) || body.ok !== true) invalidResponse("Logout response is malformed");
 }
 
 export const getGame = async (): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game", json("GET"))));
 export const submitTrade = async (command: TradeInput): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/trades", json("POST", command))));
 export const resetGame = async (idempotencyKey: string): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game/reset", json("POST", { idempotencyKey }))));
-export const getTransactions = (cursor?: string, limit = 50): Promise<TransactionPage> => {
+export const getTransactions = async (cursor?: string, limit = 50): Promise<TransactionPage> => {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
-  return response(fetch(`/api/trades?${params}`, json("GET")));
+  const value = await response<unknown>(fetch(`/api/trades?${params}`, json("GET")));
+  if (!record(value) || !Array.isArray(value.rows) || !value.rows.every(validTransaction) || !(value.nextCursor === null || typeof value.nextCursor === "string")) invalidResponse("Transaction response is malformed");
+  return value as unknown as TransactionPage;
 };
-export const getLeaderboard = (): Promise<LeaderboardSnapshot> => response(fetch("/api/leaderboard", json("GET")));
+export const getLeaderboard = async (): Promise<LeaderboardSnapshot> => {
+  const value = await response<unknown>(fetch("/api/leaderboard", json("GET")));
+  const validRow = (row: unknown) => record(row) && typeof row.address === "string" && (row.walletName === undefined || stringOrNull(row.walletName)) && decimal(row.pnl) && decimal(row.netWorth) && typeof row.liquidated === "boolean";
+  const validYou = (you: unknown) => you === undefined || you === null || record(you) && typeof you.rank === "number" && typeof you.total === "number" && decimal(you.pnl);
+  if (!record(value) || !Array.isArray(value.top) || !value.top.every(validRow) || typeof value.total !== "number" || !validYou(value.you)) invalidResponse("Leaderboard response is malformed");
+  return value as unknown as LeaderboardSnapshot;
+};
 
 export { toHexSignature };

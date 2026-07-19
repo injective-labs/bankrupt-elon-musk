@@ -61,8 +61,8 @@ function errorInfo(error: unknown): { code: string; expired: boolean } {
 }
 
 export interface GameActions {
-  login(address: string, walletName: string | null, signer: MessageSigner): Promise<void>;
-  logout(): Promise<void>;
+  login(address: string, walletName: string | null, signer: MessageSigner): Promise<boolean>;
+  logout(): Promise<boolean>;
   buy(id: string): Promise<void>; buyQty(id: string, quantity: number | string): Promise<void>; buyMax(id: string): Promise<void>;
   sell(id: string): Promise<void>; sellQty(id: string, quantity: number | string): Promise<void>; sellAll(id: string): Promise<void>;
   reset(): Promise<void>; refreshPricesNow(): Promise<void>;
@@ -84,6 +84,7 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   const epochRef = useRef(0);
   const mountedRef = useRef(true);
   const pendingRef = useRef<{ kind: PendingCommand; epoch: number } | null>(null);
+  const authTransitionRef = useRef<symbol | null>(null);
 
   const fail = useCallback((error: unknown, epoch: number) => {
     if (!mountedRef.current || epoch !== epochRef.current) return;
@@ -114,7 +115,7 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
       try { await loadGame(epoch); }
       catch (error) { if (mountedRef.current && epoch === epochRef.current) { fail(error, epoch); if (!errorInfo(error).expired) setAuthStatus("locked"); } }
     }).catch((error) => { if (mountedRef.current && epoch === epochRef.current) { fail(error, epoch); setAuthStatus("locked"); } });
-    return () => { mountedRef.current = false; epochRef.current += 1; pendingRef.current = null; };
+    return () => { mountedRef.current = false; epochRef.current += 1; pendingRef.current = null; authTransitionRef.current = null; };
   }, [api, fail, loadGame]);
 
   const command = useCallback(async (kind: PendingCommand, run: () => Promise<AccountProjection>) => {
@@ -137,23 +138,28 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
 
   const actions = useMemo<GameActions>(() => ({
     login: async (address, walletName, signer) => {
-      if (pendingRef.current?.kind === "login") return;
+      if (authTransitionRef.current) throw Object.assign(new Error("Authentication transition already pending"), { code: "AUTH_TRANSITION_PENDING" });
+      const transition = Symbol("login");
+      authTransitionRef.current = transition;
       const epoch = ++epochRef.current;
       pendingRef.current = { kind: "login", epoch };
       setPendingCommand("login"); setLastError(null); setAccount(null); setAuthStatus("loading");
       const token = pendingRef.current;
-      try { await api.loginWithSignature(address, walletName, signer); await loadGame(epoch); }
-      catch (error) { if (epoch === epochRef.current) { fail(error, epoch); if (!errorInfo(error).expired) setAuthStatus("locked"); } }
-      finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+      try { await api.loginWithSignature(address, walletName, signer); await loadGame(epoch); return epoch === epochRef.current; }
+      catch (error) { if (epoch === epochRef.current) { fail(error, epoch); if (!errorInfo(error).expired) setAuthStatus("locked"); } return false; }
+      finally { if (authTransitionRef.current === transition) authTransitionRef.current = null; if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
     },
     logout: async () => {
-      if (pendingRef.current?.kind === "logout") return;
+      if (authTransitionRef.current) throw Object.assign(new Error("Authentication transition already pending"), { code: "AUTH_TRANSITION_PENDING" });
+      const transition = Symbol("logout");
+      authTransitionRef.current = transition;
       const epoch = ++epochRef.current;
       pendingRef.current = { kind: "logout", epoch };
-      setPendingCommand("logout"); setAccount(null); setAuthStatus("locked");
+      setPendingCommand("logout"); setLastError(null);
       const token = pendingRef.current;
-      try { await api.logout(); } catch (error) { fail(error, epoch); }
-      finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+      try { await api.logout(); if (epoch === epochRef.current) { setAccount(null); setAuthStatus("locked"); } return true; }
+      catch (error) { if (epoch === epochRef.current) setLastError(errorInfo(error).code); return false; }
+      finally { if (authTransitionRef.current === transition) authTransitionRef.current = null; if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
     },
     buy: (id) => explicitQuantity(id, "BUY", 1), buyQty: (id, amount) => explicitQuantity(id, "BUY", amount),
     buyMax: (id) => trade(id, "BUY", "MAX"),

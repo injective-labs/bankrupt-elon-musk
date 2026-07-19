@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getGame, getSession, loginWithSignature } from "./gameApi";
+import { getGame, getLeaderboard, getSession, getTransactions, loginWithSignature, logout } from "./gameApi";
 
 const json = (body: unknown, status = 200) => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
@@ -29,5 +29,13 @@ describe("gameApi", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ walletName: null })).mockResolvedValueOnce(json(null, 204)));
     await expect(getSession()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
     await expect(getGame()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("accepts empty logout success but rejects unexpected logout, transaction, and leaderboard payloads", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json(null, 204)).mockResolvedValueOnce(json({ ok: false })).mockResolvedValueOnce(json({ rows: "bad", nextCursor: null })).mockResolvedValueOnce(json({ top: [], total: "bad" })));
+    await expect(logout()).resolves.toBeUndefined();
+    await expect(logout()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(getTransactions()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(getLeaderboard()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 });

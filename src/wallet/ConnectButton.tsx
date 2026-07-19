@@ -76,10 +76,13 @@ export function ConnectButton() {
               type="button"
               role="menuitem"
               className="danger"
+              disabled={pendingCommand !== null}
               onClick={() => void (async () => {
-                await actions.logout();
-                if (wallet) disconnect();
-                setOpen(false);
+                const loggedOut = await actions.logout();
+                if (loggedOut) {
+                  if (wallet) disconnect();
+                  setOpen(false);
+                }
               })()}
             >
               {label("disconnect")}

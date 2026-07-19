@@ -74,3 +74,12 @@ pnpm build: exit 0
 forbidden persistence rg: no matches
 git diff --check: no errors
 ```
+
+### Final auth-transition hardening
+
+- Login and logout now share one synchronous auth-transition lock. A competing transition rejects with `AUTH_TRANSITION_PENDING` before making any cookie-mutating request, and the lock becomes reusable after settlement.
+- Logout retains the authenticated account until the server confirms success. Failure preserves the account/session UI, records a retryable error, and prevents connector disconnection.
+- Response validation now covers logout (including valid 204), transaction history, and leaderboard payloads, with exact decimal-string checks and nullable wallet names.
+- Added deferred login/logout overlap tests in both directions, logout retry-state coverage, connector-retention coverage, and response-contract validation.
+
+Final verification: 20/20 focused tests; 156 passed and 5 skipped in the full suite; typecheck/build exited 0; forbidden persistence scan and `git diff --check` were clean.

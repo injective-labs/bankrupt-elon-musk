@@ -7,8 +7,9 @@ import type { AccountProjection } from "@/types";
 import { GameProvider, type GameApi } from "@/state/GameProvider";
 
 const disconnect = vi.fn();
+let connector = { status: "idle", wallet: null as null | { address: string; walletName: string | null }, error: null };
 vi.mock("./InjPassProvider", () => ({
-  useInjPass: () => ({ status: "idle", wallet: null, error: null, connect: vi.fn(), disconnect, signMessage: vi.fn() }),
+  useInjPass: () => ({ ...connector, connect: vi.fn(), disconnect, signMessage: vi.fn() }),
 }));
 
 import { ConnectButton } from "./ConnectButton";
@@ -18,7 +19,7 @@ const account: AccountProjection = {
 };
 
 describe("ConnectButton", () => {
-  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+  afterEach(() => { cleanup(); vi.clearAllMocks(); connector = { status: "idle", wallet: null, error: null }; });
 
   it("shows restored server identity and can log out without a connector wallet", async () => {
     const logout = vi.fn().mockResolvedValue(undefined);
@@ -32,5 +33,19 @@ describe("ConnectButton", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /断开|Disconnect/ }));
     await waitFor(() => expect(logout).toHaveBeenCalledOnce());
     expect(disconnect).not.toHaveBeenCalled();
+  });
+
+  it("keeps the connector attached when server logout fails", async () => {
+    connector = { status: "connected", wallet: { address: account.walletAddress, walletName: "connector" }, error: null };
+    const api: GameApi = {
+      getSession: vi.fn().mockResolvedValue({ walletAddress: account.walletAddress, walletName: account.walletName }), loginWithSignature: vi.fn(), logout: vi.fn().mockRejectedValue(new Error("LOGOUT_FAILED")),
+      getGame: vi.fn().mockResolvedValue(account), submitTrade: vi.fn(), resetGame: vi.fn(), getTransactions: vi.fn(), getLeaderboard: vi.fn(),
+    };
+    render(<GameProvider api={api}><ConnectButton /></GameProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /restored/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /断开|Disconnect/ }));
+    await waitFor(() => expect(api.logout).toHaveBeenCalledOnce());
+    expect(disconnect).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /restored/ })).toBeInTheDocument();
   });
 });

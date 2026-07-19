@@ -198,4 +198,57 @@ describe("GameProvider", () => {
     await act(async () => screen.getByText("sell-all").click());
     expect(submitTrade.mock.calls.map(([value]) => value.quantity)).toEqual(["2", "9007199254740993125", "MAX", "MAX"]);
   });
+
+  it("rejects logout while login owns the auth transition, then allows it after login", async () => {
+    const verified = deferred<{ walletAddress: string; walletName: null }>();
+    const client = api({ loginWithSignature: vi.fn().mockReturnValue(verified.promise), getGame: vi.fn().mockResolvedValue(projection("login")) });
+    let game!: ReturnType<typeof useGame>;
+    function Capture() { game = useGame(); return null; }
+    render(<GameProvider api={client}><Capture /></GameProvider>);
+    await waitFor(() => expect(client.getSession).toHaveBeenCalled());
+    let login!: Promise<boolean>;
+    act(() => { login = game.actions.login("0x1", null, vi.fn()); });
+    await expect(game.actions.logout()).rejects.toMatchObject({ code: "AUTH_TRANSITION_PENDING" });
+    expect(client.logout).not.toHaveBeenCalled();
+    await act(async () => { verified.resolve({ walletAddress: "0x1", walletName: null }); await expect(login).resolves.toBe(true); });
+    expect(game.authStatus).toBe("authenticated");
+    await act(async () => { await expect(game.actions.logout()).resolves.toBe(true); });
+    expect(client.logout).toHaveBeenCalledOnce();
+    expect(game.authStatus).toBe("locked");
+  });
+
+  it("rejects login while logout owns the auth transition, then allows it after logout", async () => {
+    const loggedOut = deferred<void>();
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockResolvedValue(projection("10")), logout: vi.fn().mockReturnValue(loggedOut.promise), loginWithSignature: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }) });
+    let game!: ReturnType<typeof useGame>;
+    function Capture() { game = useGame(); return null; }
+    render(<GameProvider api={client}><Capture /></GameProvider>);
+    await waitFor(() => expect(game.authStatus).toBe("authenticated"));
+    let logout!: Promise<boolean>;
+    act(() => { logout = game.actions.logout(); });
+    let logoutSettled = false;
+    void logout.then(() => { logoutSettled = true; });
+    await expect(game.actions.login("0x1", null, vi.fn())).rejects.toMatchObject({ code: "AUTH_TRANSITION_PENDING" });
+    expect(client.loginWithSignature).not.toHaveBeenCalled();
+    expect(logoutSettled).toBe(false);
+    expect(game.authStatus).toBe("authenticated");
+    expect(game.account?.cash).toBe("10");
+    await act(async () => { loggedOut.resolve(); await expect(logout).resolves.toBe(true); });
+    expect(game.authStatus).toBe("locked");
+    await act(async () => { await expect(game.actions.login("0x1", null, vi.fn())).resolves.toBe(true); });
+    expect(client.loginWithSignature).toHaveBeenCalledOnce();
+    expect(game.authStatus).toBe("authenticated");
+  });
+
+  it("keeps the authenticated account retryable when server logout fails", async () => {
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockResolvedValue(projection("10")), logout: vi.fn().mockRejectedValue(new Error("LOGOUT_FAILED")) });
+    let game!: ReturnType<typeof useGame>;
+    function Capture() { game = useGame(); return null; }
+    render(<GameProvider api={client}><Capture /></GameProvider>);
+    await waitFor(() => expect(game.authStatus).toBe("authenticated"));
+    await act(async () => { await expect(game.actions.logout()).resolves.toBe(false); });
+    expect(game.authStatus).toBe("authenticated");
+    expect(game.account?.cash).toBe("10");
+    expect(game.lastError).toBe("LOGOUT_FAILED");
+  });
 });
