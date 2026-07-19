@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as defaultApi from "@/client/gameApi";
 import type { MessageSigner, SessionView, TradeInput, TransactionPage } from "@/client/gameApi";
 import { ALL_SUBCATEGORY } from "@/data/categories";
@@ -63,8 +63,8 @@ function errorInfo(error: unknown): { code: string; expired: boolean } {
 export interface GameActions {
   login(address: string, walletName: string | null, signer: MessageSigner): Promise<void>;
   logout(): Promise<void>;
-  buy(id: string): Promise<void>; buyQty(id: string, quantity: number): Promise<void>; buyMax(id: string): Promise<void>;
-  sell(id: string): Promise<void>; sellQty(id: string, quantity: number): Promise<void>; sellAll(id: string): Promise<void>;
+  buy(id: string): Promise<void>; buyQty(id: string, quantity: number | string): Promise<void>; buyMax(id: string): Promise<void>;
+  sell(id: string): Promise<void>; sellQty(id: string, quantity: number | string): Promise<void>; sellAll(id: string): Promise<void>;
   reset(): Promise<void>; refreshPricesNow(): Promise<void>;
   setLeverage(value: number): void; borrow(amount: number | null): void; repay(amount: number | null): void; settleInterest(): void; clearLog(): void;
   toggleSound(): void; toggleLocale(): void; setCategory(category: string): void; setSubcategory(subcategory: string): void; setSearch(search: string): void; setSort(sort: SortMode): void; focusProduct(id: string): void;
@@ -81,51 +81,89 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [focusedProductId, setFocusedProductId] = useState<string | null>(null);
+  const epochRef = useRef(0);
+  const mountedRef = useRef(true);
+  const pendingRef = useRef<{ kind: PendingCommand; epoch: number } | null>(null);
 
-  const fail = useCallback((error: unknown) => {
+  const fail = useCallback((error: unknown, epoch: number) => {
+    if (!mountedRef.current || epoch !== epochRef.current) return;
     const info = errorInfo(error);
     setLastError(info.code);
-    if (info.expired) { setAccount(null); setAuthStatus("expired"); }
+    if (info.expired) {
+      epochRef.current += 1;
+      pendingRef.current = null;
+      setPendingCommand(null);
+      setAccount(null);
+      setAuthStatus("expired");
+    }
   }, []);
 
-  const loadGame = useCallback(async () => {
+  const loadGame = useCallback(async (epoch: number) => {
     const next = await api.getGame();
+    if (!mountedRef.current || epoch !== epochRef.current) return;
     setAccount(next);
     setAuthStatus("authenticated");
   }, [api]);
 
   useEffect(() => {
-    let active = true;
+    mountedRef.current = true;
+    const epoch = epochRef.current;
     void api.getSession().then(async (session) => {
-      if (!active) return;
+      if (!mountedRef.current || epoch !== epochRef.current) return;
       if (!session) { setAuthStatus("locked"); return; }
-      try { const next = await api.getGame(); if (active) { setAccount(next); setAuthStatus("authenticated"); } }
-      catch (error) { if (active) { fail(error); if (!errorInfo(error).expired) setAuthStatus("locked"); } }
-    }).catch((error) => { if (active) { fail(error); setAuthStatus("locked"); } });
-    return () => { active = false; };
-  }, [api, fail]);
+      try { await loadGame(epoch); }
+      catch (error) { if (mountedRef.current && epoch === epochRef.current) { fail(error, epoch); if (!errorInfo(error).expired) setAuthStatus("locked"); } }
+    }).catch((error) => { if (mountedRef.current && epoch === epochRef.current) { fail(error, epoch); setAuthStatus("locked"); } });
+    return () => { mountedRef.current = false; epochRef.current += 1; pendingRef.current = null; };
+  }, [api, fail, loadGame]);
 
   const command = useCallback(async (kind: PendingCommand, run: () => Promise<AccountProjection>) => {
-    if (!account || pendingCommand) return;
+    if (!account || pendingRef.current) return;
+    const token = { kind, epoch: epochRef.current };
+    pendingRef.current = token;
     setPendingCommand(kind); setLastError(null);
-    try { setAccount(await run()); } catch (error) { fail(error); } finally { setPendingCommand(null); }
-  }, [account, pendingCommand, fail]);
-  const trade = useCallback((assetId: string, side: "BUY" | "SELL", quantity: number) => command("trade", () => api.submitTrade({ assetId, side, quantity: String(quantity), idempotencyKey: idempotencyKey() })), [api, command]);
-  const quantity = useCallback((id: string) => Number(account?.positions.find((item) => item.assetId === id)?.quantity ?? 0), [account]);
-  const price = useCallback((id: string) => Number(account?.assets.find((item) => item.id === id)?.usdPrice ?? 0), [account]);
+    try {
+      const next = await run();
+      if (mountedRef.current && token.epoch === epochRef.current) setAccount(next);
+    } catch (error) { fail(error, token.epoch); }
+    finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+  }, [account, fail]);
+  const trade = useCallback((assetId: string, side: "BUY" | "SELL", quantity: string | "MAX") => command("trade", () => api.submitTrade({ assetId, side, quantity, idempotencyKey: idempotencyKey() })), [api, command]);
+  const explicitQuantity = useCallback((assetId: string, side: "BUY" | "SELL", value: number | string) => {
+    const serialized = typeof value === "string" ? value : Number.isSafeInteger(value) && value > 0 ? String(value) : null;
+    if (!serialized || !/^[1-9]\d*$/.test(serialized)) { setLastError("INVALID_QUANTITY"); return Promise.resolve(); }
+    return trade(assetId, side, serialized);
+  }, [trade]);
 
   const actions = useMemo<GameActions>(() => ({
-    login: async (address, walletName, signer) => { setPendingCommand("login"); setLastError(null); try { await api.loginWithSignature(address, walletName, signer); await loadGame(); } catch (error) { fail(error); setAccount(null); setAuthStatus("locked"); } finally { setPendingCommand(null); } },
-    logout: async () => { setPendingCommand("logout"); try { await api.logout(); } catch (error) { fail(error); } finally { setAccount(null); setAuthStatus("locked"); setPendingCommand(null); } },
-    buy: (id) => trade(id, "BUY", 1), buyQty: (id, amount) => trade(id, "BUY", amount),
-    buyMax: (id) => trade(id, "BUY", Math.max(0, Math.floor(Number(account?.cash ?? 0) / Math.max(price(id), 1)))),
-    sell: (id) => trade(id, "SELL", 1), sellQty: (id, amount) => trade(id, "SELL", amount), sellAll: (id) => trade(id, "SELL", quantity(id)),
+    login: async (address, walletName, signer) => {
+      if (pendingRef.current?.kind === "login") return;
+      const epoch = ++epochRef.current;
+      pendingRef.current = { kind: "login", epoch };
+      setPendingCommand("login"); setLastError(null); setAccount(null); setAuthStatus("loading");
+      const token = pendingRef.current;
+      try { await api.loginWithSignature(address, walletName, signer); await loadGame(epoch); }
+      catch (error) { if (epoch === epochRef.current) { fail(error, epoch); if (!errorInfo(error).expired) setAuthStatus("locked"); } }
+      finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+    },
+    logout: async () => {
+      if (pendingRef.current?.kind === "logout") return;
+      const epoch = ++epochRef.current;
+      pendingRef.current = { kind: "logout", epoch };
+      setPendingCommand("logout"); setAccount(null); setAuthStatus("locked");
+      const token = pendingRef.current;
+      try { await api.logout(); } catch (error) { fail(error, epoch); }
+      finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+    },
+    buy: (id) => explicitQuantity(id, "BUY", 1), buyQty: (id, amount) => explicitQuantity(id, "BUY", amount),
+    buyMax: (id) => trade(id, "BUY", "MAX"),
+    sell: (id) => explicitQuantity(id, "SELL", 1), sellQty: (id, amount) => explicitQuantity(id, "SELL", amount), sellAll: (id) => trade(id, "SELL", "MAX"),
     reset: () => command("reset", () => api.resetGame(idempotencyKey())), refreshPricesNow: () => command("refresh", api.getGame),
     setLeverage: (leverage) => setPreferences((p) => ({ ...p, leverage })), borrow: () => undefined, repay: () => undefined, settleInterest: () => undefined, clearLog: () => undefined,
     toggleSound: () => setPreferences((p) => ({ ...p, sound: !p.sound })), toggleLocale: () => setPreferences((p) => ({ ...p, locale: p.locale === "zh" ? "en" : "zh" })),
     setCategory: (selectedCategory) => setPreferences((p) => ({ ...p, selectedCategory, selectedSubcategory: ALL_SUBCATEGORY })), setSubcategory: (selectedSubcategory) => setPreferences((p) => ({ ...p, selectedSubcategory })), setSearch: (search) => setPreferences((p) => ({ ...p, search })), setSort: (sort) => setPreferences((p) => ({ ...p, sort })),
     focusProduct: (id) => { setFocusedProductId(id); requestAnimationFrame(() => document.querySelector(`[data-product-id="${id}"]`)?.scrollIntoView?.({ block: "center" })); },
-  }), [account, api, command, fail, loadGame, price, quantity, trade]);
+  }), [api, command, explicitQuantity, fail, loadGame, trade]);
 
   const state = useMemo(() => projectionState(account, preferences), [account, preferences]);
   return <GameContext.Provider value={{ authStatus, account, state, actions, pendingCommand, lastError, focusedProductId, flashTick: 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;

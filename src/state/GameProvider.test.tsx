@@ -21,6 +21,13 @@ const projection = (cash: string): AccountProjection => ({
   updatedAt: "2026-07-19T00:00:00.000Z",
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
 function api(overrides: Partial<GameApi> = {}): GameApi {
   return {
     getSession: vi.fn().mockResolvedValue(null),
@@ -44,6 +51,10 @@ function Probe() {
     <output data-testid="error">{game.lastError ?? "none"}</output>
     <button onClick={() => void game.actions.login("0x1111111111111111111111111111111111111111", "tester", async () => new Uint8Array([1, 2]))}>login</button>
     <button onClick={() => void game.actions.buyQty("asset", 2)}>buy</button>
+    <button onClick={() => void game.actions.buyQty("asset", "9007199254740993125")}>buy-exact</button>
+    <button onClick={() => { void game.actions.buyQty("asset", 2); void game.actions.buyQty("asset", 2); }}>double-buy</button>
+    <button onClick={() => void game.actions.buyMax("asset")}>buy-max</button>
+    <button onClick={() => void game.actions.sellAll("asset")}>sell-all</button>
     <button onClick={() => void game.actions.logout()}>logout</button>
   </>;
 }
@@ -114,5 +125,77 @@ describe("GameProvider", () => {
     expect(screen.getByTestId("status")).toHaveTextContent("expired");
     await act(async () => screen.getByText("logout").click());
     expect(screen.getByTestId("status")).toHaveTextContent("locked");
+  });
+
+  it("does not let a deferred session restore overwrite a newer login", async () => {
+    const restored = deferred<AccountProjection>();
+    const getGame = vi.fn().mockReturnValueOnce(restored.promise).mockResolvedValueOnce(projection("login"));
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), loginWithSignature: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame });
+    render(<GameProvider api={client}><Probe /></GameProvider>);
+    await waitFor(() => expect(getGame).toHaveBeenCalledOnce());
+    await act(async () => screen.getByText("login").click());
+    expect(screen.getByTestId("cash")).toHaveTextContent("login");
+    await act(async () => restored.resolve(projection("restore")));
+    expect(screen.getByTestId("cash")).toHaveTextContent("login");
+  });
+
+  it("does not let deferred restore or action results overwrite logout", async () => {
+    const restored = deferred<AccountProjection>();
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockReturnValue(restored.promise) });
+    const view = render(<GameProvider api={client}><Probe /></GameProvider>);
+    await waitFor(() => expect(client.getGame).toHaveBeenCalled());
+    await act(async () => screen.getByText("logout").click());
+    await act(async () => restored.resolve(projection("stale")));
+    expect(screen.getByTestId("cash")).toHaveTextContent("none");
+    view.unmount();
+
+    const traded = deferred<AccountProjection>();
+    const actionClient = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockResolvedValue(projection("10")), submitTrade: vi.fn().mockReturnValue(traded.promise) });
+    render(<GameProvider api={actionClient}><Probe /></GameProvider>);
+    await waitFor(() => expect(screen.getByTestId("cash")).toHaveTextContent("10"));
+    act(() => screen.getByText("buy").click());
+    await act(async () => screen.getByText("logout").click());
+    await act(async () => traded.resolve(projection("stale")));
+    expect(screen.getByTestId("cash")).toHaveTextContent("none");
+  });
+
+  it("uses a synchronous mutex for same-tick commands and exposes pending", async () => {
+    const traded = deferred<AccountProjection>();
+    const submitTrade = vi.fn().mockReturnValue(traded.promise);
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockResolvedValue(projection("10")), submitTrade });
+    render(<GameProvider api={client}><Probe /></GameProvider>);
+    await waitFor(() => expect(screen.getByTestId("cash")).toHaveTextContent("10"));
+    act(() => screen.getByText("double-buy").click());
+    expect(submitTrade).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("pending")).toHaveTextContent("trade");
+    await act(async () => traded.resolve(projection("8")));
+    expect(screen.getByTestId("pending")).toHaveTextContent("none");
+  });
+
+  it("invalidates older requests when an action expires the session", async () => {
+    const restored = deferred<AccountProjection>();
+    const unauthorized = Object.assign(new Error("UNAUTHORIZED"), { status: 401, code: "UNAUTHORIZED" });
+    const getGame = vi.fn().mockReturnValueOnce(restored.promise).mockResolvedValueOnce(projection("login"));
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), loginWithSignature: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame, submitTrade: vi.fn().mockRejectedValue(unauthorized) });
+    render(<GameProvider api={client}><Probe /></GameProvider>);
+    await waitFor(() => expect(getGame).toHaveBeenCalledOnce());
+    await act(async () => screen.getByText("login").click());
+    await act(async () => screen.getByText("buy").click());
+    expect(screen.getByTestId("status")).toHaveTextContent("expired");
+    await act(async () => restored.resolve(projection("stale")));
+    expect(screen.getByTestId("cash")).toHaveTextContent("none");
+  });
+
+  it("sends exact decimal quantities and MAX without client arithmetic", async () => {
+    const submitTrade = vi.fn().mockResolvedValue(projection("9"));
+    const held = { ...projection("10"), positions: [{ assetId: "asset", quantity: "9007199254740993.125", costBasis: "1", marketValue: "1", unrealizedPnl: "0" }] };
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockResolvedValue(held), submitTrade });
+    render(<GameProvider api={client}><Probe /></GameProvider>);
+    await waitFor(() => expect(screen.getByTestId("cash")).toHaveTextContent("10"));
+    await act(async () => screen.getByText("buy").click());
+    await act(async () => screen.getByText("buy-exact").click());
+    await act(async () => screen.getByText("buy-max").click());
+    await act(async () => screen.getByText("sell-all").click());
+    expect(submitTrade.mock.calls.map(([value]) => value.quantity)).toEqual(["2", "9007199254740993125", "MAX", "MAX"]);
   });
 });

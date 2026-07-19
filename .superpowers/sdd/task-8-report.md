@@ -55,3 +55,22 @@ The build emits pre-existing Prisma configuration deprecation and stale `baselin
 ## Compatibility Note
 
 Legacy display components still consume a derived numeric `GameState` facade and retain non-server finance controls as inert compatibility methods. Detailed component migration to use decimal `AccountProjection` fields directly belongs to Task 9.
+
+## Review Follow-up
+
+- Added a request epoch invalidated by login, logout, 401 expiry, and unmount. Restore, login load, refresh, and action responses now mutate state only while their epoch remains current.
+- Added a synchronous request-token mutex so same-tick duplicate commands issue one request and only the owning request clears the exposed pending state.
+- Preserved exact quantity strings and send `"MAX"` for buy-max/sell-all without client-side financial arithmetic.
+- Made restored cookie-session identity and logout available even when no live connector wallet exists; connector disconnect follows successful server logout when applicable.
+- Added direct fetch-contract coverage for byte-exact nonce signing, signature hex serialization, same-origin cookie credentials, both API error body shapes, and malformed successful session/account responses.
+
+Follow-up verification:
+
+```text
+Focused tests: 3 files passed, 15 tests passed
+Full tests: 22 files passed, 2 skipped; 151 tests passed, 5 skipped
+pnpm typecheck: exit 0
+pnpm build: exit 0
+forbidden persistence rg: no matches
+git diff --check: no errors
+```

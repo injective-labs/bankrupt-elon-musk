@@ -1,0 +1,33 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { getGame, getSession, loginWithSignature } from "./gameApi";
+
+const json = (body: unknown, status = 200) => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+describe("gameApi", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("signs the exact nonce message and verifies its hexadecimal bytes with same-origin cookies", async () => {
+    const message = "line one\n空 格\nline three";
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({ nonce: "n", message })).mockResolvedValueOnce(json({ walletAddress: "0x1", walletName: null }));
+    vi.stubGlobal("fetch", fetchMock);
+    const signer = vi.fn().mockResolvedValue(new Uint8Array([0, 15, 255]));
+    await loginWithSignature("0x1", null, signer);
+    expect(signer).toHaveBeenCalledWith(message);
+    expect(fetchMock.mock.calls.every(([, init]) => init.credentials === "same-origin")).toBe(true);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ address: "0x1", walletName: null, signature: "0x000fff" });
+  });
+
+  it.each([
+    [{ error: { code: "TRADE_REJECTED", message: "No" } }, "TRADE_REJECTED", "No"],
+    [{ error: "Bad address" }, "HTTP_400", "Bad address"],
+  ])("parses structured and string error bodies", async (body, code, message) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json(body, 400)));
+    await expect(getGame()).rejects.toEqual(expect.objectContaining({ status: 400, code, message }));
+  });
+
+  it("rejects malformed or empty successful session and account payloads", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ walletName: null })).mockResolvedValueOnce(json(null, 204)));
+    await expect(getSession()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(getGame()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+});

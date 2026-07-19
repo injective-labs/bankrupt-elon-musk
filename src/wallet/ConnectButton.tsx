@@ -25,26 +25,32 @@ const LABELS = {
 
 export function ConnectButton() {
   const { status, wallet, error, connect, disconnect, signMessage } = useInjPass();
-  const { state, authStatus, actions, pendingCommand } = useGame();
+  const { state, authStatus, account, actions, pendingCommand } = useGame();
   const locale = state.locale;
 
   const [open, setOpen] = useState(false);
 
   const label = (key: keyof typeof LABELS) => LABELS[key][locale];
 
-  if (status === "connected" && wallet) {
+  const identity = authStatus === "authenticated" && account
+    ? { address: account.walletAddress, walletName: account.walletName }
+    : status === "connected" && wallet
+      ? { address: wallet.address, walletName: wallet.walletName }
+      : null;
+
+  if (identity) {
     return (
       <div className="wallet-chip-wrap">
         <button
           className="icon-button wallet-chip"
           type="button"
           onClick={() => setOpen((v) => !v)}
-          title={wallet.address}
+          title={identity.address}
         >
           <span aria-hidden="true">🟣</span>
           <span className="wallet-chip-label">
-            {wallet.walletName ? `${wallet.walletName} · ` : ""}
-            {truncate(wallet.address)}
+            {identity.walletName ? `${identity.walletName} · ` : ""}
+            {truncate(identity.address)}
           </span>
         </button>
         {open && (
@@ -52,7 +58,7 @@ export function ConnectButton() {
             <div className="wallet-status" role="status">
               {label(authStatus === "authenticated" ? "authenticated" : "loginRequired")}
             </div>
-            {authStatus !== "authenticated" && (
+            {authStatus !== "authenticated" && wallet && (
               <button
                 type="button"
                 role="menuitem"
@@ -70,11 +76,11 @@ export function ConnectButton() {
               type="button"
               role="menuitem"
               className="danger"
-              onClick={() => {
-                void actions.logout();
-                disconnect();
+              onClick={() => void (async () => {
+                await actions.logout();
+                if (wallet) disconnect();
                 setOpen(false);
-              }}
+              })()}
             >
               {label("disconnect")}
             </button>
