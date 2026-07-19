@@ -1,6 +1,3 @@
-// Standalone game backend schema (Postgres). Decoupled from inj-pass-backend.
-// Normalized: Player (account + leaderboard snapshot + prefs), Position (per-asset),
-// TradeLog (append-only history), AuthNonce (login challenge).
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,53 +7,137 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum TransactionType {
+  BUY
+  SELL
+  RESET
+}
+
+enum QuoteStatus {
+  ACTIVE
+  STALE
+  ERROR
+}
+
 model Player {
-  walletAddress         String   @id
-  walletName            String?
-
-  // Account scalars
-  cash                  Float
-  debt                  Float
-  accruedInterest       Float    @default(0)
-  lastInterestAccruedAt Float
-  liquidated            Boolean  @default(false)
-  leverage              Int      @default(1)
-
-  // Leaderboard snapshot (computed client-side at save time using live prices)
-  netWorth              Float
-  pnl                   Float
-  holdingsValue         Float
-
-  // UI preferences (synced across devices)
-  locale                String   @default("zh")
-  sound                 Boolean  @default(true)
-  sort                  String   @default("featured")
-
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-
-  positions             Position[]
-  trades                TradeLog[]
-
-  @@index([pnl]) // loss leaderboard ordering (ascending = biggest loss first)
+  walletAddress String        @id
+  walletName    String?
+  cash          Decimal       @db.Decimal(30, 8)
+  lastLoginAt   DateTime
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  positions     Position[]
+  transactions  Transaction[]
+  trades        TradeLog[]
 }
 
 model Position {
-  id            Int    @id @default(autoincrement())
-  player        Player @relation(fields: [walletAddress], references: [walletAddress], onDelete: Cascade)
+  id            Int      @id @default(autoincrement())
   walletAddress String
-  productId     String
-  quantity      Float
-  costBasis     Float
+  assetId       String
+  quantity      Decimal  @db.Decimal(30, 12)
+  costBasis     Decimal  @db.Decimal(30, 8)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  player        Player   @relation(fields: [walletAddress], references: [walletAddress], onDelete: Cascade)
+  asset         Asset    @relation(fields: [assetId], references: [id])
 
-  @@unique([walletAddress, productId])
+  @@unique([walletAddress, assetId])
+  @@index([assetId, walletAddress])
 }
 
+model Transaction {
+  id              BigInt          @id @default(autoincrement())
+  walletAddress   String
+  idempotencyKey  String
+  type            TransactionType
+  assetId         String?
+  quantity        Decimal?        @db.Decimal(30, 12)
+  nativePrice     Decimal?        @db.Decimal(30, 12)
+  currency        String?
+  fxRateToUsd     Decimal?        @db.Decimal(30, 12)
+  usdUnitPrice    Decimal?        @db.Decimal(30, 12)
+  usdAmount       Decimal         @db.Decimal(30, 8)
+  cashBefore      Decimal         @db.Decimal(30, 8)
+  cashAfter       Decimal         @db.Decimal(30, 8)
+  quantityBefore  Decimal?        @db.Decimal(30, 12)
+  quantityAfter   Decimal?        @db.Decimal(30, 12)
+  costBasisBefore Decimal?        @db.Decimal(30, 8)
+  costBasisAfter  Decimal?        @db.Decimal(30, 8)
+  marketDate      DateTime?       @db.Date
+  createdAt       DateTime        @default(now())
+  player          Player          @relation(fields: [walletAddress], references: [walletAddress], onDelete: Cascade)
+  asset           Asset?          @relation(fields: [assetId], references: [id])
+
+  @@unique([walletAddress, idempotencyKey])
+  @@index([walletAddress, createdAt])
+  @@index([assetId])
+}
+
+model Asset {
+  id              String            @id
+  ticker          String
+  quoteSymbol     String            @unique
+  nameZh          String
+  nameEn          String?
+  assetClass      String
+  subCategory     String?
+  currency        String
+  unit            String
+  quoteMultiplier Decimal           @default(1) @db.Decimal(30, 12)
+  enabled         Boolean           @default(true)
+  displayOrder    Int
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  positions       Position[]
+  transactions    Transaction[]
+  quote           AssetQuote?
+  dailyPrices     AssetDailyPrice[]
+
+  @@index([enabled, displayOrder])
+}
+
+model AssetQuote {
+  assetId     String      @id
+  nativePrice Decimal     @db.Decimal(30, 12)
+  currency    String
+  fxRateToUsd Decimal     @db.Decimal(30, 12)
+  usdPrice    Decimal     @db.Decimal(30, 12)
+  marketDate  DateTime    @db.Date
+  source      String
+  status      QuoteStatus
+  fetchedAt   DateTime
+  updatedAt   DateTime    @updatedAt
+  asset       Asset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([status, marketDate])
+}
+
+model AssetDailyPrice {
+  id          BigInt   @id @default(autoincrement())
+  assetId     String
+  marketDate  DateTime @db.Date
+  open        Decimal? @db.Decimal(30, 12)
+  high        Decimal? @db.Decimal(30, 12)
+  low         Decimal? @db.Decimal(30, 12)
+  close       Decimal  @db.Decimal(30, 12)
+  currency    String
+  fxRateToUsd Decimal  @db.Decimal(30, 12)
+  usdClose    Decimal  @db.Decimal(30, 12)
+  source      String
+  fetchedAt   DateTime
+  asset       Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, marketDate])
+  @@index([marketDate])
+}
+
+// Retained unchanged as legacy, append-only historical information.
 model TradeLog {
   id            BigInt   @id @default(autoincrement())
   player        Player   @relation(fields: [walletAddress], references: [walletAddress], onDelete: Cascade)
   walletAddress String
-  ts            Float // client monotonic timestamp; used for idempotent incremental insert
+  ts            Float
   title         String
   detail        String
   createdAt     DateTime @default(now())

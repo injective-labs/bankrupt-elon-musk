@@ -11,14 +11,14 @@ function maskAddress(address: string): string {
   return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
-// Public loss leaderboard: biggest loss (lowest pnl) first. Optional Bearer adds
-// the caller's own real rank.
+// Temporary compatibility response. A later task replaces this route with the
+// server-computed loss leaderboard based on authoritative positions and quotes.
 export async function GET(request: Request) {
   const [rows, total] = await Promise.all([
     prisma.player.findMany({
-      orderBy: { pnl: "asc" },
+      orderBy: { createdAt: "asc" },
       take: TOP_N,
-      select: { walletAddress: true, walletName: true, pnl: true, netWorth: true, liquidated: true },
+      select: { walletAddress: true, walletName: true, cash: true },
     }),
     prisma.player.count(),
   ]);
@@ -26,9 +26,9 @@ export async function GET(request: Request) {
   const top: LeaderboardRow[] = rows.map((r) => ({
     address: maskAddress(r.walletAddress),
     walletName: r.walletName,
-    pnl: r.pnl,
-    netWorth: r.netWorth,
-    liquidated: r.liquidated,
+    pnl: 0,
+    netWorth: r.cash.toNumber(),
+    liquidated: false,
   }));
 
   let you: { rank: number; total: number; pnl: number } | null = null;
@@ -36,11 +36,10 @@ export async function GET(request: Request) {
   if (wallet) {
     const me = await prisma.player.findUnique({
       where: { walletAddress: wallet },
-      select: { pnl: true },
+      select: { walletAddress: true },
     });
     if (me) {
-      const ahead = await prisma.player.count({ where: { pnl: { lt: me.pnl } } });
-      you = { rank: ahead + 1, total, pnl: me.pnl };
+      you = { rank: 1, total, pnl: 0 };
     }
   }
 
