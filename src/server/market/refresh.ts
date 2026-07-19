@@ -7,6 +7,7 @@ import { fetchDailyBar, type DailyBar } from "./yahoo";
 
 const SOURCE = "Yahoo Finance";
 const DEFAULT_CONCURRENCY = 8;
+const MAX_CONCURRENCY = 32;
 
 export interface RefreshSummary {
   attempted: number;
@@ -82,14 +83,13 @@ async function loadFxRates(assets: RefreshAsset[], concurrency: number) {
   return rates;
 }
 
-async function persistBar(asset: RefreshAsset, bar: DailyBar, fxRate: Prisma.Decimal, fetchedAt: Date) {
+export async function persistDailyBarIfCurrent(
+  asset: RefreshAsset,
+  bar: DailyBar,
+  fxRate: Prisma.Decimal,
+  fetchedAt: Date,
+) {
   const marketDate = utcMarketDate(bar.marketDate);
-  const existing = await prisma.assetQuote.findUnique({
-    where: { assetId: asset.id },
-    select: { marketDate: true },
-  });
-  if (existing && existing.marketDate > marketDate) return existing.marketDate;
-
   const close = scaled(bar.close, asset.quoteMultiplier) as Prisma.Decimal;
   const open = scaled(bar.open, asset.quoteMultiplier);
   const high = scaled(bar.high, asset.quoteMultiplier);
@@ -102,37 +102,56 @@ async function persistBar(asset: RefreshAsset, bar: DailyBar, fxRate: Prisma.Dec
     fetchedAt,
   };
 
-  await prisma.$transaction(async (tx) => {
+  const persisted = await prisma.$transaction(async (tx) => {
+    const accepted = await tx.$queryRaw<Array<{ marketDate: Date }>>(Prisma.sql`
+      INSERT INTO "AssetQuote" (
+        "assetId", "nativePrice", "currency", "fxRateToUsd", "usdPrice",
+        "marketDate", "source", "status", "fetchedAt", "updatedAt"
+      ) VALUES (
+        ${asset.id}, ${close}, ${asset.currency}, ${fxRate}, ${usdClose},
+        ${marketDate}, ${SOURCE}, 'ACTIVE'::"QuoteStatus", ${fetchedAt}, ${fetchedAt}
+      )
+      ON CONFLICT ("assetId") DO UPDATE SET
+        "nativePrice" = EXCLUDED."nativePrice",
+        "currency" = EXCLUDED."currency",
+        "fxRateToUsd" = EXCLUDED."fxRateToUsd",
+        "usdPrice" = EXCLUDED."usdPrice",
+        "marketDate" = EXCLUDED."marketDate",
+        "source" = EXCLUDED."source",
+        "status" = EXCLUDED."status",
+        "fetchedAt" = EXCLUDED."fetchedAt",
+        "updatedAt" = EXCLUDED."updatedAt"
+      WHERE "AssetQuote"."marketDate" <= EXCLUDED."marketDate"
+      RETURNING "marketDate"
+    `);
+    if (accepted.length === 0) return null;
+
     await tx.assetDailyPrice.upsert({
       where: { assetId_marketDate: { assetId: asset.id, marketDate } },
       create: { assetId: asset.id, marketDate, open, high, low, close, usdClose, ...shared },
       update: { open, high, low, close, usdClose, ...shared },
     });
-    await tx.assetQuote.upsert({
-      where: { assetId: asset.id },
-      create: {
-        assetId: asset.id,
-        nativePrice: close,
-        usdPrice: usdClose,
-        marketDate,
-        status: QuoteStatus.ACTIVE,
-        ...shared,
-      },
-      update: {
-        nativePrice: close,
-        usdPrice: usdClose,
-        marketDate,
-        status: QuoteStatus.ACTIVE,
-        ...shared,
-      },
-    });
+    return accepted[0].marketDate;
   });
-  return marketDate;
+  if (persisted) return persisted;
+
+  const current = await prisma.assetQuote.findUnique({
+    where: { assetId: asset.id },
+    select: { marketDate: true },
+  });
+  if (!current) throw new Error(`Atomic quote update returned no row for ${asset.id}`);
+  return current.marketDate;
 }
 
 export async function refreshMarket(options: RefreshMarketOptions = {}): Promise<RefreshSummary> {
   const fetchedAt = options.now ?? new Date();
-  const concurrency = Math.max(1, Math.floor(options.concurrency ?? DEFAULT_CONCURRENCY));
+  const requestedConcurrency = options.concurrency ?? DEFAULT_CONCURRENCY;
+  if (!Number.isFinite(requestedConcurrency)
+    || !Number.isInteger(requestedConcurrency)
+    || requestedConcurrency <= 0) {
+    throw new RangeError("concurrency must be a finite positive integer");
+  }
+  const concurrency = Math.min(requestedConcurrency, MAX_CONCURRENCY);
   const assets = await prisma.asset.findMany({
     where: { enabled: true },
     orderBy: { displayOrder: "asc" },
@@ -151,23 +170,27 @@ export async function refreshMarket(options: RefreshMarketOptions = {}): Promise
         throw new Error(`FX rate unavailable for ${asset.currency}`);
       }
       const bar = await fetchDailyBar(asset.quoteSymbol);
-      const marketDate = await persistBar(asset, bar, fxRate, fetchedAt);
+      const marketDate = await persistDailyBarIfCurrent(asset, bar, fxRate, fetchedAt);
       marketDates[asset.id] = dateKey(marketDate);
       active += 1;
     } catch {
       failed += 1;
+      const marked = await prisma.assetQuote.updateMany({
+        where: {
+          assetId: asset.id,
+          fetchedAt: { lt: fetchedAt },
+          updatedAt: { lt: fetchedAt },
+        },
+        data: { status: QuoteStatus.ERROR, fetchedAt },
+      });
       const existing = await prisma.assetQuote.findUnique({
         where: { assetId: asset.id },
         select: { marketDate: true },
       });
-      if (existing) {
+      if (marked.count > 0) {
         stale += 1;
-        marketDates[asset.id] = dateKey(existing.marketDate);
-        await prisma.assetQuote.updateMany({
-          where: { assetId: asset.id },
-          data: { status: QuoteStatus.ERROR, fetchedAt },
-        });
       }
+      if (existing) marketDates[asset.id] = dateKey(existing.marketDate);
     }
   });
 

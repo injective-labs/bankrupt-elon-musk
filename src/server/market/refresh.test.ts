@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   quoteUpsert: vi.fn(),
   quoteUpdateMany: vi.fn(),
   dailyUpsert: vi.fn(),
+  queryRaw: vi.fn(),
   transaction: vi.fn(),
 }));
 
@@ -56,13 +57,14 @@ describe("refreshMarket", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.mockImplementation(async (callback) => callback({
-      assetQuote: { upsert: mocks.quoteUpsert },
       assetDailyPrice: { upsert: mocks.dailyUpsert },
+      $queryRaw: mocks.queryRaw,
     }));
     mocks.quoteFindUnique.mockResolvedValue(null);
     mocks.quoteUpsert.mockResolvedValue({});
     mocks.dailyUpsert.mockResolvedValue({});
     mocks.quoteUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.queryRaw.mockResolvedValue([{ marketDate: new Date("2026-07-17") }]);
   });
 
   it("persists only the latest daily row and the matching quote with one FX snapshot", async () => {
@@ -93,15 +95,13 @@ describe("refreshMarket", () => {
         usdClose: new Prisma.Decimal("76.8"),
       }),
     }));
-    expect(mocks.quoteUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { assetId: "tencent" },
-      create: expect.objectContaining({
-        nativePrice: new Prisma.Decimal(600),
-        fxRateToUsd: new Prisma.Decimal("0.128"),
-        usdPrice: new Prisma.Decimal("76.8"),
-        status: "ACTIVE",
-      }),
-    }));
+    expect(mocks.queryRaw.mock.calls[1][0].values).toEqual(expect.arrayContaining([
+      "tencent",
+      new Prisma.Decimal(600),
+      new Prisma.Decimal("0.128"),
+      new Prisma.Decimal("76.8"),
+      new Date("2026-07-17"),
+    ]));
   });
 
   it("keeps a failed asset's last price, marks it error, and commits other assets", async () => {
@@ -114,14 +114,18 @@ describe("refreshMarket", () => {
       if (symbol === "AAPL") return bar(symbol, 200);
       throw new Error("upstream unavailable");
     });
+    mocks.quoteUpdateMany.mockResolvedValue({ count: 1 });
 
     const summary = await refreshMarket({ now: new Date("2026-07-19T10:00:00Z") });
 
     expect(summary).toMatchObject({ attempted: 2, active: 1, stale: 1, failed: 1 });
     expect(mocks.dailyUpsert).toHaveBeenCalledTimes(1);
-    expect(mocks.quoteUpsert).toHaveBeenCalledTimes(1);
     expect(mocks.quoteUpdateMany).toHaveBeenCalledWith({
-      where: { assetId: "tencent" },
+      where: {
+        assetId: "tencent",
+        fetchedAt: { lt: new Date("2026-07-19T10:00:00Z") },
+        updatedAt: { lt: new Date("2026-07-19T10:00:00Z") },
+      },
       data: { status: "ERROR", fetchedAt: new Date("2026-07-19T10:00:00Z") },
     });
   });
@@ -129,6 +133,7 @@ describe("refreshMarket", () => {
   it("never overwrites either table with an older upstream market date", async () => {
     mocks.assetFindMany.mockResolvedValue([usdAsset]);
     mocks.quoteFindUnique.mockResolvedValue({ marketDate: new Date("2026-07-18") });
+    mocks.queryRaw.mockResolvedValue([]);
     mocks.fetchDailyBar.mockResolvedValue(bar("AAPL", 190, "USD", "2026-07-17"));
 
     const summary = await refreshMarket({ now: new Date("2026-07-19T10:00:00Z") });
@@ -140,9 +145,8 @@ describe("refreshMarket", () => {
       failed: 0,
       marketDates: { apple: "2026-07-18" },
     });
-    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.transaction).toHaveBeenCalledOnce();
     expect(mocks.dailyUpsert).not.toHaveBeenCalled();
-    expect(mocks.quoteUpsert).not.toHaveBeenCalled();
   });
 
   it("bounds concurrent asset requests", async () => {
@@ -165,4 +169,87 @@ describe("refreshMarket", () => {
 
     expect(maximum).toBe(2);
   });
+
+  it("does not let an older refresh that completes last overwrite a newer quote", async () => {
+    mocks.assetFindMany.mockResolvedValue([usdAsset]);
+    let stored: { marketDate: Date; close: Prisma.Decimal } | null = null;
+    mocks.quoteFindUnique.mockImplementation(async () => stored);
+    mocks.fetchDailyBar
+      .mockResolvedValueOnce(bar("AAPL", 190, "USD", "2026-07-17"))
+      .mockResolvedValueOnce(bar("AAPL", 210, "USD", "2026-07-18"));
+
+    let releaseOlder!: () => void;
+    const olderPaused = new Promise<void>((resolve) => { releaseOlder = resolve; });
+    let transactionNumber = 0;
+    mocks.transaction.mockImplementation(async (callback) => {
+      transactionNumber += 1;
+      if (transactionNumber === 1) await olderPaused;
+      return callback({
+        assetDailyPrice: { upsert: mocks.dailyUpsert },
+        $queryRaw: vi.fn(async (sql) => {
+          const [, close, , , , marketDate] = sql.values;
+          if (stored && stored.marketDate > marketDate) return [];
+          stored = { marketDate, close };
+          return [{ marketDate }];
+        }),
+      });
+    });
+
+    const older = refreshMarket({ now: new Date("2026-07-19T10:00:00Z") });
+    await vi.waitFor(() => expect(mocks.transaction).toHaveBeenCalledTimes(1));
+    const newer = refreshMarket({ now: new Date("2026-07-19T11:00:00Z") });
+    await newer;
+    releaseOlder();
+    await older;
+
+    expect(stored).not.toBeNull();
+    const finalQuote = stored as unknown as { marketDate: Date; close: Prisma.Decimal };
+    expect(finalQuote.marketDate).toEqual(new Date("2026-07-18"));
+    expect(finalQuote.close.toString()).toBe("210");
+  });
+
+  it("does not let an older failed run mark a newer successful quote as error", async () => {
+    mocks.assetFindMany.mockResolvedValue([usdAsset]);
+    let stored: { marketDate: Date; fetchedAt: Date; status: string } | null = null;
+    mocks.quoteFindUnique.mockImplementation(async () => stored);
+    let rejectOlder!: (reason: Error) => void;
+    mocks.fetchDailyBar
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOlder = reject; }))
+      .mockResolvedValueOnce(bar("AAPL", 210, "USD", "2026-07-18"));
+    mocks.transaction.mockImplementation(async (callback) => callback({
+      assetDailyPrice: { upsert: mocks.dailyUpsert },
+      $queryRaw: vi.fn(async (sql) => {
+        const [, , , , , marketDate, , fetchedAt] = sql.values;
+        if (stored && stored.marketDate > marketDate) return [];
+        stored = { marketDate, fetchedAt, status: "ACTIVE" };
+        return [{ marketDate }];
+      }),
+    }));
+    mocks.quoteUpdateMany.mockImplementation(async ({ where }) => {
+      if (stored && stored.fetchedAt < where.fetchedAt.lt && stored.fetchedAt < where.updatedAt.lt) {
+        stored.status = "ERROR";
+        return { count: 1 };
+      }
+      return { count: 0 };
+    });
+
+    const older = refreshMarket({ now: new Date("2026-07-19T10:00:00Z") });
+    await vi.waitFor(() => expect(mocks.fetchDailyBar).toHaveBeenCalledTimes(1));
+    await refreshMarket({ now: new Date("2026-07-19T11:00:00Z") });
+    rejectOlder(new Error("old upstream failure"));
+    await older;
+
+    expect(stored).not.toBeNull();
+    const finalQuote = stored as unknown as { fetchedAt: Date; status: string };
+    expect(finalQuote.status).toBe("ACTIVE");
+    expect(finalQuote.fetchedAt).toEqual(new Date("2026-07-19T11:00:00Z"));
+  });
+
+  it.each([0, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    "rejects invalid concurrency %s",
+    async (concurrency) => {
+      await expect(refreshMarket({ concurrency })).rejects.toThrow(/concurrency/i);
+      expect(mocks.assetFindMany).not.toHaveBeenCalled();
+    },
+  );
 });
