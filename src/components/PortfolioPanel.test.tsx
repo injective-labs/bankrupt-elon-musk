@@ -31,6 +31,16 @@ describe("PortfolioPanel authoritative projection", () => {
     expect(screen.getAllByText("$24.50")).toHaveLength(2);
   });
 
+  it("marks the portfolio panel after a successful reset", async () => {
+    function Harness() { const { actions } = useGame(); return <><button onClick={() => void actions.reset()}>reset</button><PortfolioPanel /></>; }
+    render(<GameProvider api={api({ resetGame: vi.fn().mockResolvedValue(base) })}><Harness /></GameProvider>);
+    await screen.findByText("$9,007,199,254,740,993.12");
+
+    await act(async () => screen.getByRole("button", { name: "reset" }).click());
+
+    expect(screen.getByRole("complementary")).toHaveClass("reset-success");
+  });
+
   it("shows an explicit unavailable state when leaderboard loading fails", async () => {
     render(<GameProvider api={api({ getLeaderboard: vi.fn().mockRejectedValue(new Error("down")) })}><PortfolioPanel /></GameProvider>);
     await waitFor(() => expect(screen.getByText(/排行榜暂不可用|Leaderboard unavailable/)).toBeInTheDocument());

@@ -58,6 +58,37 @@ describe("ProductCard authoritative trading states", () => {
     await act(async () => reject(Object.assign(new Error("no funds"), { code: "INSUFFICIENT_CASH" })));
     expect(screen.getByRole("alert")).toHaveTextContent(/余额不足|Insufficient cash/);
     expect(view.getByRole("button", { name: /确认买入|Confirm buy/ })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: /买入数量|Buy quantity/ })).toHaveValue(1);
+    expect(screen.getByRole("article")).toHaveClass("trade-error");
+  });
+
+  it("marks only the target card and initiating control as pending", async () => {
+    let resolve!: (value: AccountProjection) => void;
+    const request = new Promise<AccountProjection>((done) => { resolve = done; });
+    const client = api({ submitTrade: vi.fn().mockReturnValue(request) });
+    render(<GameProvider api={client}><ProductCard {...props} /></GameProvider>);
+    const allIn = await screen.findByRole("button", { name: "All-in" });
+    await waitFor(() => expect(allIn).toBeEnabled());
+
+    fireEvent.click(allIn);
+
+    expect(screen.getByRole("article")).toHaveClass("trade-pending");
+    expect(screen.getByRole("button", { name: /Buying/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Buy" })).toBeDisabled();
+    await act(async () => resolve(account()));
+  });
+
+  it("closes the matching ticket and marks the card after a successful trade", async () => {
+    const onCloseTicket = vi.fn();
+    const client = api({ submitTrade: vi.fn().mockResolvedValue(account()) });
+    render(<GameProvider api={client}><ProductCard {...props} activeSide="buy" onCloseTicket={onCloseTicket} /></GameProvider>);
+    const confirm = await screen.findByRole("button", { name: /确认买入|Confirm buy/ });
+    await waitFor(() => expect(confirm).toBeEnabled());
+
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(onCloseTicket).toHaveBeenCalledOnce());
+    expect(screen.getByRole("article")).toHaveClass("trade-success");
   });
 
   it("sends MAX for all-in without deriving a quantity from client cash", async () => {

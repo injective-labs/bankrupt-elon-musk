@@ -2,6 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountProjection } from "@/types";
 import { GameProvider, useGame, type GameApi } from "./GameProvider";
@@ -50,6 +51,8 @@ function Probe() {
     <output data-testid="status">{game.authStatus}</output>
     <output data-testid="cash">{game.account?.cash ?? "none"}</output>
     <output data-testid="pending">{game.pendingCommand ?? "none"}</output>
+    <output data-testid="pending-target">{game.pendingOperation ? `${game.pendingOperation.kind}:${game.pendingOperation.assetId ?? "none"}:${game.pendingOperation.side ?? "none"}` : "none"}</output>
+    <output data-testid="feedback">{game.feedback ? `${game.feedback.id}:${game.feedback.status}:${game.feedback.kind}:${game.feedback.assetId ?? "none"}` : "none"}</output>
     <output data-testid="error">{game.lastError ?? "none"}</output>
     <output data-testid="market-count">{game.market?.assets.length ?? 0}</output>
     <output data-testid="market-status">{game.marketStatus}</output>
@@ -194,6 +197,22 @@ describe("GameProvider", () => {
     expect(screen.getByTestId("pending")).toHaveTextContent("none");
   });
 
+  it("emits targeted pending, success, and error feedback for trades", async () => {
+    const first = deferred<AccountProjection>();
+    const submitTrade = vi.fn().mockReturnValueOnce(first.promise).mockRejectedValueOnce(Object.assign(new Error("no cash"), { code: "INSUFFICIENT_CASH" }));
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockResolvedValue(projection("10")), submitTrade });
+    render(<GameProvider api={client}><Probe /></GameProvider>);
+    await waitFor(() => expect(screen.getByTestId("cash")).toHaveTextContent("10"));
+
+    act(() => screen.getByText("buy").click());
+    expect(screen.getByTestId("pending-target")).toHaveTextContent("trade:asset:BUY");
+    await act(async () => first.resolve(projection("8")));
+    expect(screen.getByTestId("feedback")).toHaveTextContent("1:success:trade:asset");
+
+    await act(async () => screen.getByText("buy").click());
+    expect(screen.getByTestId("feedback")).toHaveTextContent("2:error:trade:asset");
+  });
+
   it("invalidates older requests when an action expires the session", async () => {
     const restored = deferred<AccountProjection>();
     const unauthorized = Object.assign(new Error("UNAUTHORIZED"), { status: 401, code: "UNAUTHORIZED" });
@@ -272,6 +291,18 @@ describe("GameProvider", () => {
     expect(game.authStatus).toBe("authenticated");
     expect(game.account?.cash).toBe("10");
     expect(game.lastError).toBe("LOGOUT_FAILED");
+  });
+
+  it("keeps dismissFeedback stable across provider rerenders", async () => {
+    const client = api({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getGame: vi.fn().mockResolvedValue(projection("10")) });
+    function StableActionProbe() {
+      const game = useGame();
+      const initial = useRef(game.actions.dismissFeedback);
+      return <><output data-testid="dismiss-stability">{initial.current === game.actions.dismissFeedback ? "stable" : "changed"}</output><output data-testid="stable-action-cash">{game.account?.cash ?? "none"}</output></>;
+    }
+    render(<GameProvider api={client}><StableActionProbe /></GameProvider>);
+    await waitFor(() => expect(screen.getByTestId("stable-action-cash")).toHaveTextContent("10"));
+    expect(screen.getByTestId("dismiss-stability")).toHaveTextContent("stable");
   });
 
   it("ticks into the live settlement window after the projection has loaded", async () => {

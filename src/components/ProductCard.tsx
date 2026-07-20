@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import type { Product, Locale } from "@/types";
 import { labelFrom } from "@/i18n";
 import { errorText, t } from "@/i18n";
@@ -43,7 +43,7 @@ function TradeTicket({
   side: TradeSide;
   onClose: () => void;
 }) {
-  const { state, account, clockNow, authStatus, tradingLocked, actions, pendingCommand, lastError } = useGame();
+  const { state, account, clockNow, authStatus, tradingLocked, actions, pendingCommand, pendingOperation, feedback, lastError } = useGame();
   const locale = state.locale;
   const asset = account?.assets.find((item) => item.id === product.id);
   const position = account?.positions.find((item) => item.assetId === product.id);
@@ -61,12 +61,20 @@ function TradeTicket({
   const limitLabel = side === "buy" ? t(locale, "maxBuyable") : t(locale, "maxSellable");
   const fractionHint = side === "buy" ? t(locale, "fractionHintBuy") : t(locale, "fractionHintSell");
   const confirmLabel = side === "buy" ? t(locale, "confirmBuy") : t(locale, "confirmSell");
+  const operationSide = side === "buy" ? "BUY" : "SELL";
+  const operationPending = pendingOperation?.kind === "trade" && pendingOperation.assetId === product.id && pendingOperation.side === operationSide;
 
   const submit = () => {
     if (!validQuantity) return;
     if (side === "buy") actions.buyQty(product.id, qty);
     else actions.sellQty(product.id, qty);
   };
+
+  useEffect(() => {
+    if (feedback?.kind === "trade" && feedback.status === "success" && feedback.assetId === product.id && feedback.side === operationSide) {
+      onClose();
+    }
+  }, [feedback?.id, feedback?.kind, feedback?.status, feedback?.assetId, feedback?.side, onClose, operationSide, product.id]);
 
   return (
     <div className="trade-ticket" data-side={side}>
@@ -122,7 +130,7 @@ function TradeTicket({
           disabled={confirmDisabled}
           onClick={submit}
         >
-          {confirmLabel}
+          {operationPending ? <><span className="operation-spinner" aria-hidden="true" />{t(locale, side === "buy" ? "processingBuy" : "processingSell")}</> : confirmLabel}
         </button>
         <button className="trade-cancel-button" type="button" onClick={onClose}>
           {t(locale, "cancel")}
@@ -214,7 +222,7 @@ function ProductCardBase({
   onOpenTicket,
   onCloseTicket,
 }: ProductCardProps) {
-  const { account, market, clockNow, authStatus, tradingLocked, pendingCommand, actions } = useGame();
+  const { account, market, clockNow, authStatus, tradingLocked, pendingCommand, pendingOperation, feedback, actions } = useGame();
   const { beginLogin, busy: loginBusy } = useInjPassLogin();
   const asset = (account?.assets ?? market?.assets)?.find((item) => item.id === product.id);
   const authoritativeOwned = account?.positions.find((item) => item.assetId === product.id)?.quantity;
@@ -226,10 +234,15 @@ function ProductCardBase({
   const sourceLabel = t(locale, `quote.${quoteStatus}`);
   const displayPrice = asset?.usdPrice ? formatDecimalCurrency(asset.usdPrice) : "$--";
   const displayOwned = authoritativeOwned ?? String(owned);
+  const targetedPending = pendingOperation?.kind === "trade" && pendingOperation.assetId === product.id;
+  const targetedFeedback = feedback?.kind === "trade" && feedback.assetId === product.id ? feedback : null;
+  const feedbackClass = targetedFeedback ? ` trade-${targetedFeedback.status}` : "";
+  const buyingMax = targetedPending && pendingOperation.side === "BUY" && activeSide === null;
+  const sellingAll = targetedPending && pendingOperation.side === "SELL" && activeSide === null;
 
   return (
     <article
-      className={`product-card${overdraft ? " overdraft" : ""}${owned ? " owned" : ""}${selected ? " selected" : ""}${activeSide ? " has-trade-ticket" : ""}`}
+      className={`product-card${overdraft ? " overdraft" : ""}${owned ? " owned" : ""}${selected ? " selected" : ""}${activeSide ? " has-trade-ticket" : ""}${targetedPending ? " trade-pending" : ""}${feedbackClass}`}
       style={{ ["--accent" as string]: product.accent }}
       data-product-id={product.id}
     >
@@ -266,7 +279,7 @@ function ProductCardBase({
           disabled={tradeDisabled}
           onClick={() => { if (authenticated) void actions.buyMax(product.id); else void beginLogin(); }}
         >
-          {t(locale, "allIn")}
+          {buyingMax ? <><span className="operation-spinner" aria-hidden="true" />{t(locale, "processingBuy")}</> : t(locale, "allIn")}
         </button>
         <button
           className="sell-button"
@@ -282,7 +295,7 @@ function ProductCardBase({
           disabled={tradeDisabled || (authenticated && !isPositiveDecimal(displayOwned))}
           onClick={() => { if (authenticated) void actions.sellAll(product.id); else void beginLogin(); }}
         >
-          {t(locale, "sellAll")}
+          {sellingAll ? <><span className="operation-spinner" aria-hidden="true" />{t(locale, "processingSell")}</> : t(locale, "sellAll")}
         </button>
       </div>
       {activeSide && (

@@ -22,6 +22,18 @@ export interface GameApi {
 
 export type AuthStatus = "loading" | "locked" | "authenticated" | "expired";
 type PendingCommand = "login" | "logout" | "trade" | "reset" | "refresh";
+export interface PendingOperation {
+  kind: PendingCommand;
+  assetId?: string;
+  side?: "BUY" | "SELL";
+}
+export interface OperationFeedback extends PendingOperation {
+  id: number;
+  status: "success" | "error";
+  code?: string;
+  quantity?: string;
+  usdAmount?: string;
+}
 
 interface Preferences { locale: Locale; sound: boolean; selectedCategory: string; selectedSubcategory: string; search: string; sort: SortMode }
 const initialPreferences: Preferences = { locale: "zh", sound: true, selectedCategory: "全部", selectedSubcategory: ALL_SUBCATEGORY, search: "", sort: "price-asc" };
@@ -56,10 +68,11 @@ export interface GameActions {
   buy(id: string): Promise<void>; buyQty(id: string, quantity: string): Promise<void>; buyMax(id: string): Promise<void>;
   sell(id: string): Promise<void>; sellQty(id: string, quantity: string): Promise<void>; sellAll(id: string): Promise<void>;
   reset(): Promise<void>; refreshPricesNow(): Promise<void>; retryMarket(): Promise<void>;
+  dismissFeedback(): void;
   toggleSound(): void; toggleLocale(): void; setCategory(category: string): void; setSubcategory(subcategory: string): void; setSearch(search: string): void; setSort(sort: SortMode): void; focusProduct(id: string): void;
 }
 
-interface GameContextValue { authStatus: AuthStatus; account: AccountProjection | null; market: MarketProjection | null; marketStatus: "loading" | "loaded" | "error"; marketError: boolean; clockNow: Date; tradingLocked: boolean; leaderboard: LeaderboardSnapshot | null; leaderboardStatus: "idle" | "loading" | "loaded" | "error"; leaderboardError: boolean; state: GameState; actions: GameActions; pendingCommand: PendingCommand | null; lastError: string | null; focusedProductId: string | null; flashTick: number; ready: boolean }
+interface GameContextValue { authStatus: AuthStatus; account: AccountProjection | null; market: MarketProjection | null; marketStatus: "loading" | "loaded" | "error"; marketError: boolean; clockNow: Date; tradingLocked: boolean; leaderboard: LeaderboardSnapshot | null; leaderboardStatus: "idle" | "loading" | "loaded" | "error"; leaderboardError: boolean; state: GameState; actions: GameActions; pendingCommand: PendingCommand | null; pendingOperation: PendingOperation | null; feedback: OperationFeedback | null; lastError: string | null; focusedProductId: string | null; flashTick: number; ready: boolean }
 const GameContext = createContext<GameContextValue | null>(null);
 export function useGame() { const value = useContext(GameContext); if (!value) throw new Error("useGame must be used within GameProvider"); return value; }
 
@@ -75,6 +88,8 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   const [clockNow, setClockNow] = useState(() => new Date());
   const [preferences, setPreferences] = useState(initialPreferences);
   const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null);
+  const [pendingOperation, setPendingOperation] = useState<PendingOperation | null>(null);
+  const [feedback, setFeedback] = useState<OperationFeedback | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [focusedProductId, setFocusedProductId] = useState<string | null>(null);
   const epochRef = useRef(0);
@@ -82,15 +97,18 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   const pendingRef = useRef<{ kind: PendingCommand; epoch: number } | null>(null);
   const authTransitionRef = useRef<symbol | null>(null);
   const marketRequestRef = useRef(0);
+  const feedbackIdRef = useRef(0);
 
-  const fail = useCallback((error: unknown, epoch: number) => {
+  const fail = useCallback((error: unknown, epoch: number, operation?: PendingOperation) => {
     if (!mountedRef.current || epoch !== epochRef.current) return;
     const info = errorInfo(error);
     setLastError(info.code);
+    if (operation) setFeedback({ ...operation, id: ++feedbackIdRef.current, status: "error", code: info.code });
     if (info.expired) {
       epochRef.current += 1;
       pendingRef.current = null;
       setPendingCommand(null);
+      setPendingOperation(null);
       setAccount(null);
       setAuthStatus("expired");
     }
@@ -138,32 +156,45 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   const command = useCallback(async (kind: PendingCommand, run: () => Promise<AccountProjection>) => {
     if (!account || pendingRef.current) return;
     const token = { kind, epoch: epochRef.current };
+    const operation: PendingOperation = { kind };
     pendingRef.current = token;
-    setPendingCommand(kind); setLastError(null);
+    setPendingCommand(kind); setPendingOperation(operation); setLastError(null);
     try {
       const next = await run();
-      if (mountedRef.current && token.epoch === epochRef.current) setAccount(next);
-    } catch (error) { fail(error, token.epoch); }
-    finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+      if (mountedRef.current && token.epoch === epochRef.current) {
+        setAccount(next);
+        setFeedback({ ...operation, id: ++feedbackIdRef.current, status: "success" });
+      }
+    } catch (error) { fail(error, token.epoch, operation); }
+    finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); setPendingOperation(null); } }
   }, [account, fail]);
   const trade = useCallback(async (assetId: string, side: "BUY" | "SELL", quantity: string | "MAX") => {
     if (!account || !market || pendingRef.current) return;
     const token = { kind: "trade" as const, epoch: epochRef.current };
+    const operation: PendingOperation = { kind: "trade", assetId, side };
     pendingRef.current = token;
-    setPendingCommand("trade"); setLastError(null);
+    setPendingCommand("trade"); setPendingOperation(operation); setLastError(null);
     try {
       const result = await api.submitTrade({ assetId, side, quantity, idempotencyKey: idempotencyKey() });
       if (mountedRef.current && token.epoch === epochRef.current) {
         if ("walletAddress" in result) setAccount(result);
         else setAccount((current) => current ? applyTradeReceipt(current, market, result) : current);
+        setFeedback({
+          ...operation,
+          id: ++feedbackIdRef.current,
+          status: "success",
+          quantity: "walletAddress" in result ? quantity : result.quantity,
+          usdAmount: "walletAddress" in result ? undefined : result.usdAmount,
+        });
       }
-    } catch (error) { fail(error, token.epoch); }
-    finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+    } catch (error) { fail(error, token.epoch, operation); }
+    finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); setPendingOperation(null); } }
   }, [account, api, fail, market]);
   const explicitQuantity = useCallback((assetId: string, side: "BUY" | "SELL", value: string) => {
     if (!/^[1-9]\d*$/.test(value)) { setLastError("INVALID_QUANTITY"); return Promise.resolve(); }
     return trade(assetId, side, value);
   }, [trade]);
+  const dismissFeedback = useCallback(() => setFeedback(null), []);
 
   const actions = useMemo<GameActions>(() => ({
     login: async (address, walletName, signer) => {
@@ -172,11 +203,11 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
       authTransitionRef.current = transition;
       const epoch = ++epochRef.current;
       pendingRef.current = { kind: "login", epoch };
-      setPendingCommand("login"); setLastError(null); setAccount(null); setAuthStatus("loading");
+      setPendingCommand("login"); setPendingOperation({ kind: "login" }); setLastError(null); setAccount(null); setAuthStatus("loading");
       const token = pendingRef.current;
-      try { await api.loginWithSignature(address, walletName, signer); await loadGame(epoch); return epoch === epochRef.current; }
-      catch (error) { if (epoch === epochRef.current) { fail(error, epoch); if (!errorInfo(error).expired) setAuthStatus("locked"); } return false; }
-      finally { if (authTransitionRef.current === transition) authTransitionRef.current = null; if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+      try { await api.loginWithSignature(address, walletName, signer); await loadGame(epoch); if (epoch === epochRef.current) setFeedback({ kind: "login", id: ++feedbackIdRef.current, status: "success" }); return epoch === epochRef.current; }
+      catch (error) { if (epoch === epochRef.current) { fail(error, epoch, { kind: "login" }); if (!errorInfo(error).expired) setAuthStatus("locked"); } return false; }
+      finally { if (authTransitionRef.current === transition) authTransitionRef.current = null; if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); setPendingOperation(null); } }
     },
     logout: async () => {
       if (authTransitionRef.current) throw Object.assign(new Error("Authentication transition already pending"), { code: "AUTH_TRANSITION_PENDING" });
@@ -184,20 +215,21 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
       authTransitionRef.current = transition;
       const epoch = ++epochRef.current;
       pendingRef.current = { kind: "logout", epoch };
-      setPendingCommand("logout"); setLastError(null);
+      setPendingCommand("logout"); setPendingOperation({ kind: "logout" }); setLastError(null);
       const token = pendingRef.current;
-      try { await api.logout(); if (epoch === epochRef.current) { setAccount(null); setAuthStatus("locked"); } return true; }
-      catch (error) { if (epoch === epochRef.current) setLastError(errorInfo(error).code); return false; }
-      finally { if (authTransitionRef.current === transition) authTransitionRef.current = null; if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+      try { await api.logout(); if (epoch === epochRef.current) { setAccount(null); setAuthStatus("locked"); setFeedback({ kind: "logout", id: ++feedbackIdRef.current, status: "success" }); } return true; }
+      catch (error) { if (epoch === epochRef.current) fail(error, epoch, { kind: "logout" }); return false; }
+      finally { if (authTransitionRef.current === transition) authTransitionRef.current = null; if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); setPendingOperation(null); } }
     },
     buy: (id) => explicitQuantity(id, "BUY", "1"), buyQty: (id, amount) => explicitQuantity(id, "BUY", amount),
     buyMax: (id) => trade(id, "BUY", "MAX"),
     sell: (id) => explicitQuantity(id, "SELL", "1"), sellQty: (id, amount) => explicitQuantity(id, "SELL", amount), sellAll: (id) => trade(id, "SELL", "MAX"),
     reset: () => command("reset", () => api.resetGame(idempotencyKey())), refreshPricesNow: () => command("refresh", api.getGame), retryMarket: loadMarket,
+    dismissFeedback,
     toggleSound: () => setPreferences((p) => ({ ...p, sound: !p.sound })), toggleLocale: () => setPreferences((p) => ({ ...p, locale: p.locale === "zh" ? "en" : "zh" })),
     setCategory: (selectedCategory) => setPreferences((p) => ({ ...p, selectedCategory, selectedSubcategory: ALL_SUBCATEGORY })), setSubcategory: (selectedSubcategory) => setPreferences((p) => ({ ...p, selectedSubcategory })), setSearch: (search) => setPreferences((p) => ({ ...p, search })), setSort: (sort) => setPreferences((p) => ({ ...p, sort })),
     focusProduct: (id) => { setFocusedProductId(id); requestAnimationFrame(() => document.querySelector(`[data-product-id="${id}"]`)?.scrollIntoView?.({ block: "center" })); },
-  }), [api, command, explicitQuantity, fail, loadGame, loadMarket, trade]);
+  }), [api, command, dismissFeedback, explicitQuantity, fail, loadGame, loadMarket, trade]);
 
   const state = useMemo(() => projectionState(preferences), [preferences]);
   useEffect(() => { const update = () => setClockNow(new Date()); update(); const id = setInterval(update, 1000); return () => clearInterval(id); }, []);
@@ -209,5 +241,5 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
     void Promise.resolve(api.getLeaderboard()).then((value) => { if (active && value) { setLeaderboard(value); setLeaderboardStatus("loaded"); } }).catch(() => { if (active) { setLeaderboard(null); setLeaderboardError(true); setLeaderboardStatus("error"); } });
     return () => { active = false; };
   }, [api, authStatus, account?.updatedAt]);
-  return <GameContext.Provider value={{ authStatus, account, market, marketStatus, marketError, clockNow, tradingLocked, leaderboard, leaderboardStatus, leaderboardError, state, actions, pendingCommand, lastError, focusedProductId, flashTick: 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;
+  return <GameContext.Provider value={{ authStatus, account, market, marketStatus, marketError, clockNow, tradingLocked, leaderboard, leaderboardStatus, leaderboardError, state, actions, pendingCommand, pendingOperation, feedback, lastError, focusedProductId, flashTick: feedback?.id ?? 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;
 }

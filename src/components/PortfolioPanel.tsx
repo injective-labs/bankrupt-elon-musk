@@ -8,13 +8,15 @@ import { formatDecimalCurrency, formatDecimalNumber } from "@/game/format";
 const numericTone = (value: string) => Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "neutral";
 
 export function PortfolioPanel() {
-  const { account, state, actions, focusedProductId, leaderboard, leaderboardStatus } = useGame();
+  const { account, state, actions, focusedProductId, leaderboard, leaderboardStatus, feedback } = useGame();
   const locale = state.locale;
   const positions = account?.positions ?? [];
   const assets = new Map((account?.assets ?? []).map((asset) => [asset.id, asset]));
   const rank = leaderboard?.you;
 
-  return <aside className="panel inventory-panel" aria-labelledby="inventoryTitle">
+  const resetSucceeded = feedback?.kind === "reset" && feedback.status === "success";
+
+  return <aside className={`panel inventory-panel${resetSucceeded ? " reset-success" : ""}`} aria-labelledby="inventoryTitle">
     <div className="panel-heading"><div><p className="eyebrow">Portfolio</p><h2 id="inventoryTitle">{t(locale, "portfolio")}</h2></div><span className="pill">{positions.length} {t(locale, "typesUnit")}</span></div>
     <div className="money-stack">
       <div className="metric primary"><span className="net-worth-label"><b>{t(locale, "netWorth")}</b><em>{t(locale, "netWorthFormula")}</em></span><strong>{formatDecimalCurrency(account?.netWorth ?? "0")}</strong></div>
