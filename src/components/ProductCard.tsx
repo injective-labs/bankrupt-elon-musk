@@ -7,6 +7,7 @@ import { errorText, t } from "@/i18n";
 import { SUBCATEGORY_LABELS } from "@/data/categoryLabels";
 import { getProductCategory } from "@/data/categories";
 import { useGame } from "@/state/GameProvider";
+import { useInjPassLogin } from "@/wallet/useInjPassLogin";
 import {
   getAssetMark,
   getMarkFontSize,
@@ -214,10 +215,13 @@ function ProductCardBase({
   onCloseTicket,
 }: ProductCardProps) {
   const { account, market, clockNow, authStatus, tradingLocked, pendingCommand, actions } = useGame();
+  const { beginLogin, busy: loginBusy } = useInjPassLogin();
   const asset = (account?.assets ?? market?.assets)?.find((item) => item.id === product.id);
   const authoritativeOwned = account?.positions.find((item) => item.assetId === product.id)?.quantity;
   const quoteStatus = asset?.quoteStatus === "ACTIVE" && asset.marketDate && !isQuoteFresh(asset.marketDate, clockNow) ? "STALE" : asset?.quoteStatus ?? "MISSING";
-  const tradeDisabled = authStatus !== "authenticated" || pendingCommand !== null || tradingLocked || !asset?.enabled || quoteStatus !== "ACTIVE" || asset.usdPrice === null;
+  const quoteDisabled = !asset?.enabled || quoteStatus !== "ACTIVE" || asset.usdPrice === null;
+  const authenticated = authStatus === "authenticated";
+  const tradeDisabled = quoteDisabled || (authenticated ? pendingCommand !== null || tradingLocked : loginBusy);
   const tagLabel = product.subCategory || getProductCategory(product);
   const sourceLabel = t(locale, `quote.${quoteStatus}`);
   const displayPrice = asset?.usdPrice ? formatDecimalCurrency(asset.usdPrice) : "$--";
@@ -252,7 +256,7 @@ function ProductCardBase({
           className="buy-button"
           type="button"
           disabled={tradeDisabled}
-          onClick={() => onOpenTicket(product.id, "buy")}
+          onClick={() => { if (authenticated) onOpenTicket(product.id, "buy"); else void beginLogin(); }}
         >
           {t(locale, "buy")}
         </button>
@@ -260,23 +264,23 @@ function ProductCardBase({
           className="max-button"
           type="button"
           disabled={tradeDisabled}
-          onClick={() => { void actions.buyMax(product.id); }}
+          onClick={() => { if (authenticated) void actions.buyMax(product.id); else void beginLogin(); }}
         >
           {t(locale, "allIn")}
         </button>
         <button
           className="sell-button"
           type="button"
-          disabled={tradeDisabled || !isPositiveDecimal(displayOwned)}
-          onClick={() => onOpenTicket(product.id, "sell")}
+          disabled={tradeDisabled || (authenticated && !isPositiveDecimal(displayOwned))}
+          onClick={() => { if (authenticated) onOpenTicket(product.id, "sell"); else void beginLogin(); }}
         >
           {t(locale, "sell")}
         </button>
         <button
           className="sell-all-button"
           type="button"
-          disabled={tradeDisabled || !isPositiveDecimal(displayOwned)}
-          onClick={() => { void actions.sellAll(product.id); }}
+          disabled={tradeDisabled || (authenticated && !isPositiveDecimal(displayOwned))}
+          onClick={() => { if (authenticated) void actions.sellAll(product.id); else void beginLogin(); }}
         >
           {t(locale, "sellAll")}
         </button>

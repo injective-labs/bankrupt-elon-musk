@@ -34,6 +34,7 @@ const EMBED_URL =
 
 export function InjPassProvider({ children }: { children: ReactNode }) {
   const connectorRef = useRef<InjPassConnector | null>(null);
+  const connectPromiseRef = useRef<Promise<ConnectedWallet | null> | null>(null);
   const [status, setStatus] = useState<WalletStatus>("idle");
   const [wallet, setWallet] = useState<ConnectedWallet | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,21 +54,28 @@ export function InjPassProvider({ children }: { children: ReactNode }) {
     return connectorRef.current;
   }, []);
 
-  const connect = useCallback(async () => {
-    setError(null);
-    setStatus("connecting");
-    try {
-      // Must be triggered from a user gesture so the auth popup is allowed.
-      const connected = await getConnector().connect();
-      setWallet(connected);
-      setStatus("connected");
-      return connected;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-      setStatus("idle");
-      return null;
-    }
+  const connect = useCallback(() => {
+    if (connectPromiseRef.current) return connectPromiseRef.current;
+    const request = (async () => {
+      setError(null);
+      setStatus("connecting");
+      try {
+        // Must be triggered from a user gesture so the auth popup is allowed.
+        const connected = await getConnector().connect();
+        setWallet(connected);
+        setStatus("connected");
+        return connected;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        setStatus("idle");
+        return null;
+      } finally {
+        connectPromiseRef.current = null;
+      }
+    })();
+    connectPromiseRef.current = request;
+    return request;
   }, [getConnector]);
 
   const disconnect = useCallback(() => {

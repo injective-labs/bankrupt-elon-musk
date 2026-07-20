@@ -8,6 +8,11 @@ import { GameProvider, type GameApi } from "@/state/GameProvider";
 import { productById } from "@/data/expandedAssets";
 import { ProductCard } from "./ProductCard";
 
+const beginLogin = vi.fn().mockResolvedValue(true);
+vi.mock("@/wallet/useInjPassLogin", () => ({
+  useInjPassLogin: () => ({ beginLogin, busy: false, error: null }),
+}));
+
 const product = [...productById.values()][0];
 const asset = { id: product.id, name: product.name, nameEn: product.nameEn, category: product.assetClass || "美股", subCategory: product.subCategory, ticker: product.ticker || product.id, currency: "USD", unit: product.unit, unitEn: product.unitEn, enabled: true, displayOrder: 1, usdPrice: "12.3456789", marketDate: "2026-07-18T00:00:00.000Z", quoteStatus: "ACTIVE" as const };
 const account = (overrides: Partial<AccountProjection> = {}): AccountProjection => ({ walletAddress: "0x1", cash: "100", holdingsValue: "0", netWorth: "100", pnl: "0", positions: [], assets: [asset], recentTransactions: [], marketAsOf: asset.marketDate, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T00:00:00.000Z", ...overrides });
@@ -15,12 +20,20 @@ const api = (overrides: Partial<GameApi> = {}): GameApi => ({ getSession: vi.fn(
 const props = { product, price: Number(asset.usdPrice), owned: 0, overdraft: false, currency: "USD", live: true, selected: false, locale: "en" as const, activeSide: null, onOpenTicket: vi.fn(), onCloseTicket: vi.fn() };
 
 describe("ProductCard authoritative trading states", () => {
-  afterEach(() => { cleanup(); vi.useRealTimers(); });
+  afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
 
-  it("disables every trade control while signed out", async () => {
-    render(<GameProvider api={api({ getSession: vi.fn().mockResolvedValue(null) })}><ProductCard {...props} /></GameProvider>);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Buy" })).toBeDisabled());
-    expect(screen.getByRole("button", { name: "All-in" })).toBeDisabled();
+  it("routes every signed-out trade intent to login without opening a ticket or trading", async () => {
+    const client = api({ getSession: vi.fn().mockResolvedValue(null) });
+    const onOpenTicket = vi.fn();
+    render(<GameProvider api={client}><ProductCard {...props} onOpenTicket={onOpenTicket} /></GameProvider>);
+    const buttons = await Promise.all(["Buy", "All-in", "Sell", "Close"].map(async (name) => screen.findByRole("button", { name })));
+    buttons.forEach((button) => {
+      expect(button).toBeEnabled();
+      fireEvent.click(button);
+    });
+    expect(beginLogin).toHaveBeenCalledTimes(4);
+    expect(onOpenTicket).not.toHaveBeenCalled();
+    expect(client.submitTrade).not.toHaveBeenCalled();
   });
 
   it("shows quote date and stale status and prevents trading", async () => {

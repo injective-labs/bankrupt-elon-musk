@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useInjPass } from "./InjPassProvider";
 import { useGame } from "@/state/GameProvider";
+import { useInjPassLogin } from "./useInjPassLogin";
 
 function truncate(address: string): string {
   if (!address) return "";
@@ -24,8 +25,9 @@ const LABELS = {
 };
 
 export function ConnectButton() {
-  const { status, wallet, error, connect, disconnect, signMessage } = useInjPass();
+  const { status, wallet, error, disconnect, signMessage } = useInjPass();
   const { state, authStatus, account, actions, pendingCommand } = useGame();
+  const { beginLogin, busy } = useInjPassLogin();
   const locale = state.locale;
 
   const [open, setOpen] = useState(false);
@@ -98,16 +100,8 @@ export function ConnectButton() {
       <button
         className="icon-button wallet-connect"
         type="button"
-        disabled={status === "connecting" || pendingCommand === "login"}
-        onClick={() => void (async () => {
-          const connected = await connect();
-          if (!connected) return;
-          await actions.login(connected.address, connected.walletName ?? null, async (message) => {
-            const signature = await connected.signer.signMessage(message);
-            if (!signature) throw new Error("SIGNATURE_REQUIRED");
-            return signature;
-          });
-        })()}
+        disabled={busy}
+        onClick={() => void beginLogin()}
         title={label("connect")}
       >
         <span aria-hidden="true">🔗</span>
