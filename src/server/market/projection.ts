@@ -1,6 +1,7 @@
 import type { MarketProjection } from "@/types";
 import { prisma } from "@/server/db";
 import { isQuoteFresh } from "@/server/quoteFreshness";
+import { decimalToString } from "@/server/decimal";
 
 export async function getMarketProjection(now = new Date()): Promise<MarketProjection> {
   const assets = await prisma.asset.findMany({
@@ -22,7 +23,7 @@ export async function getMarketProjection(now = new Date()): Promise<MarketProje
       unit: asset.unit,
       enabled: asset.enabled,
       displayOrder: asset.displayOrder,
-      usdPrice: asset.quote?.usdPrice.toString() ?? null,
+      usdPrice: asset.quote ? decimalToString(asset.quote.usdPrice) : null,
       marketDate: asset.quote?.marketDate.toISOString() ?? null,
       quoteStatus: !asset.quote
         ? "MISSING"

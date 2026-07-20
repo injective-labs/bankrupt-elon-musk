@@ -5,6 +5,7 @@ import { isSettlementLocked } from "@/game/marketClock";
 import { prisma } from "./db";
 import { ApiError } from "./http/errors";
 import { isQuoteFresh } from "./quoteFreshness";
+import { decimalToString } from "./decimal";
 
 export interface TradeCommand {
   assetId: string;
@@ -70,11 +71,11 @@ function receipt(row: ReceiptRow, requestedQuantity?: string): TradeReceipt {
   }
   return {
     id: row.id.toString(), idempotencyKey: row.idempotencyKey, side: row.type, assetId: row.assetId,
-    requestedQuantity: row.requestedQuantity ?? requestedQuantity ?? row.quantity.toString(),
-    quantity: row.quantity.toString(), usdUnitPrice: row.usdUnitPrice.toString(), usdAmount: row.usdAmount.toString(),
-    cashBefore: row.cashBefore.toString(), cashAfter: row.cashAfter.toString(),
-    quantityBefore: row.quantityBefore.toString(), quantityAfter: row.quantityAfter.toString(),
-    costBasisBefore: row.costBasisBefore.toString(), costBasisAfter: row.costBasisAfter.toString(),
+    requestedQuantity: row.requestedQuantity ?? requestedQuantity ?? decimalToString(row.quantity),
+    quantity: decimalToString(row.quantity), usdUnitPrice: decimalToString(row.usdUnitPrice), usdAmount: decimalToString(row.usdAmount),
+    cashBefore: decimalToString(row.cashBefore), cashAfter: decimalToString(row.cashAfter),
+    quantityBefore: decimalToString(row.quantityBefore), quantityAfter: decimalToString(row.quantityAfter),
+    costBasisBefore: decimalToString(row.costBasisBefore), costBasisAfter: decimalToString(row.costBasisAfter),
     marketDate: row.marketDate.toISOString(), createdAt: row.createdAt.toISOString(),
   };
 }
@@ -170,7 +171,7 @@ export async function executeTrade(walletAddress: string, command: TradeCommand)
 }
 
 function view(row: Transaction): TransactionView {
-  return { id: row.id.toString(), type: row.type, assetId: row.assetId, quantity: row.quantity?.toString() ?? null, usdUnitPrice: row.usdUnitPrice?.toString() ?? null, usdAmount: row.usdAmount.toString(), createdAt: row.createdAt.toISOString() };
+  return { id: row.id.toString(), type: row.type, assetId: row.assetId, quantity: row.quantity ? decimalToString(row.quantity) : null, usdUnitPrice: row.usdUnitPrice ? decimalToString(row.usdUnitPrice) : null, usdAmount: decimalToString(row.usdAmount), createdAt: row.createdAt.toISOString() };
 }
 
 export async function getTradeHistory(walletAddress: string, options: { cursor?: string; limit?: number } = {}) {

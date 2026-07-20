@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { LeaderboardRow, LeaderboardSnapshot } from "@/types";
 import { prisma } from "./db";
+import { decimalToString } from "./decimal";
 import { STARTING_CASH } from "./account";
 import { ApiError } from "./http/errors";
 
@@ -79,8 +80,8 @@ export async function getLossLeaderboard(
       .map((row) => ({
         address: maskAddress(row.walletAddress),
         walletName: row.walletName,
-        pnl: row.pnl.toString(),
-        netWorth: row.netWorth.toString(),
+        pnl: decimalToString(row.pnl),
+        netWorth: decimalToString(row.netWorth),
       }));
     const caller = walletAddress
       ? rows.find((row) => row.walletAddress.toLowerCase() === walletAddress.toLowerCase())
@@ -89,7 +90,7 @@ export async function getLossLeaderboard(
       top,
       total,
       you: caller
-        ? { rank: Number(caller.rank), total: Number(caller.total), pnl: caller.pnl.toString() }
+        ? { rank: Number(caller.rank), total: Number(caller.total), pnl: decimalToString(caller.pnl) }
         : null,
     };
   }, { isolationLevel: "RepeatableRead" });

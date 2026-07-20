@@ -10,6 +10,10 @@ describe("decimal boundaries", () => {
     );
   });
 
+  it("serializes tiny decimals without exponent notation", () => {
+    expect(decimalToString(new Prisma.Decimal("0.000000009"))).toBe("0.000000009");
+  });
+
   it("parses a positive integer quantity", () => {
     expect(parsePositiveIntegerQuantity("12").toString()).toBe("12");
   });

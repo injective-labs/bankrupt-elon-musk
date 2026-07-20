@@ -5,6 +5,7 @@ import { isSettlementLocked } from "@/game/marketClock";
 import { prisma } from "./db";
 import { ApiError } from "./http/errors";
 import { isQuoteFresh } from "./quoteFreshness";
+import { decimalToString } from "./decimal";
 
 export const STARTING_CASH = new Prisma.Decimal("50000000000");
 
@@ -31,10 +32,6 @@ export async function loginPlayer(
 
 export async function findPlayer(walletAddress: string): Promise<Player | null> {
   return prisma.player.findUnique({ where: { walletAddress } });
-}
-
-function decimal(value: Prisma.Decimal): string {
-  return value.toString();
 }
 
 export async function getAccountProjectionInTransaction(
@@ -72,7 +69,7 @@ export async function getAccountProjectionInTransaction(
       unit: asset.unit,
       enabled: asset.enabled,
       displayOrder: asset.displayOrder,
-      usdPrice: quote ? decimal(quote.usdPrice) : null,
+      usdPrice: quote ? decimalToString(quote.usdPrice) : null,
       marketDate: quote ? quote.marketDate.toISOString() : null,
       quoteStatus: !quote ? "MISSING" : tooOld ? "STALE" : quote.status,
     };
@@ -95,10 +92,10 @@ export async function getAccountProjectionInTransaction(
       if (marketValue) holdingsValue = holdingsValue.add(marketValue);
       return {
         assetId: position.assetId,
-        quantity: decimal(position.quantity),
-        costBasis: decimal(position.costBasis),
-        marketValue: marketValue ? decimal(marketValue) : null,
-        unrealizedPnl: marketValue ? decimal(marketValue.sub(position.costBasis)) : null,
+        quantity: decimalToString(position.quantity),
+        costBasis: decimalToString(position.costBasis),
+        marketValue: marketValue ? decimalToString(marketValue) : null,
+        unrealizedPnl: marketValue ? decimalToString(marketValue.sub(position.costBasis)) : null,
       };
     })
     .sort((left, right) =>
@@ -110,9 +107,9 @@ export async function getAccountProjectionInTransaction(
     id: transaction.id.toString(),
     type: transaction.type,
     assetId: transaction.assetId,
-    quantity: transaction.quantity ? decimal(transaction.quantity) : null,
-    usdUnitPrice: transaction.usdUnitPrice ? decimal(transaction.usdUnitPrice) : null,
-    usdAmount: decimal(transaction.usdAmount),
+    quantity: transaction.quantity ? decimalToString(transaction.quantity) : null,
+    usdUnitPrice: transaction.usdUnitPrice ? decimalToString(transaction.usdUnitPrice) : null,
+    usdAmount: decimalToString(transaction.usdAmount),
     createdAt: transaction.createdAt.toISOString(),
   }));
   const quoteDates = assets.flatMap((asset) => (asset.quote ? [asset.quote.marketDate] : []));
@@ -123,10 +120,10 @@ export async function getAccountProjectionInTransaction(
   return {
     walletAddress: player.walletAddress,
     walletName: player.walletName,
-    cash: decimal(player.cash),
-    holdingsValue: decimal(holdingsValue),
-    netWorth: decimal(netWorth),
-    pnl: decimal(netWorth.sub(STARTING_CASH)),
+    cash: decimalToString(player.cash),
+    holdingsValue: decimalToString(holdingsValue),
+    netWorth: decimalToString(netWorth),
+    pnl: decimalToString(netWorth.sub(STARTING_CASH)),
     positions,
     assets: assetViews,
     recentTransactions,

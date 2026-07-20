@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 export function decimalToString(
   value: Prisma.Decimal | string | number,
 ): string {
-  return new Prisma.Decimal(value).toString();
+  const normalized = typeof value === "object" ? value.toString() : value;
+  return new Prisma.Decimal(normalized).toFixed();
 }
 
 export function parsePositiveIntegerQuantity(value: unknown): Prisma.Decimal {
