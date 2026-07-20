@@ -51,8 +51,10 @@ model Transaction {
   id              BigInt          @id @default(autoincrement())
   walletAddress   String
   idempotencyKey  String
-  commandSnapshot Json
-  resultSnapshot  Json
+  commandSnapshot Json?
+  resultSnapshot  Json?
+  requestedQuantity String?
+  requestFingerprint String?
   type            TransactionType
   assetId         String?
   quantity        Decimal?        @db.Decimal(30, 12)
@@ -74,6 +76,7 @@ model Transaction {
 
   @@unique([walletAddress, idempotencyKey])
   @@index([walletAddress, createdAt])
+  @@index([walletAddress, id])
   @@index([assetId])
 }
 

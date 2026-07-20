@@ -17,6 +17,15 @@ import { isSettlementLocked } from "@/game/marketClock";
 const d = (value: string) => new Prisma.Decimal(value);
 const wallet = "0x0000000000000000000000000000000000000001";
 const command = { assetId: "stock", side: "BUY" as const, quantity: "2", idempotencyKey: "00000000-0000-4000-8000-000000000001" };
+const ledgerRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 1n, idempotencyKey: command.idempotencyKey, type: "BUY", assetId: "stock",
+  requestedQuantity: "2", requestFingerprint: null, commandSnapshot: command, resultSnapshot: null,
+  quantity: d("2"), nativePrice: d("5"), currency: "USD", fxRateToUsd: d("1"),
+  usdUnitPrice: d("5"), usdAmount: d("10"), cashBefore: d("100"), cashAfter: d("90"),
+  quantityBefore: d("0"), quantityAfter: d("2"), costBasisBefore: d("0"), costBasisAfter: d("10"),
+  marketDate: new Date("2026-07-18"), createdAt: new Date("2026-07-19T12:00:00Z"),
+  walletAddress: wallet, ...overrides,
+});
 
 function tx() {
   return {
@@ -31,7 +40,7 @@ describe("executeTrade", () => {
     vi.clearAllMocks(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-07-19T12:00:00Z"));
     mocks.transaction.mockImplementation((fn) => fn(tx()));
     mocks.transactionFind.mockResolvedValue(null); mocks.position.mockResolvedValue(null); mocks.replayFind.mockResolvedValue(null);
-    mocks.transactionCreate.mockResolvedValue({ id: 1n });
+    mocks.transactionCreate.mockResolvedValue(ledgerRow());
     mocks.player.mockResolvedValue({ cash: d("100"), updatedAt: new Date() });
     mocks.asset.mockResolvedValue({ id: "stock", enabled: true, quoteMultiplier: d("1"), quote: { nativePrice: d("5"), currency: "USD", fxRateToUsd: d("1"), usdPrice: d("5"), marketDate: new Date("2026-07-18"), status: "ACTIVE" } });
     mocks.projection.mockResolvedValue({ walletAddress: wallet, cash: "90", holdingsValue: "10", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T12:00:00.000Z" });
@@ -83,42 +92,46 @@ describe("executeTrade", () => {
 
   it("returns idempotently without a second mutation", async () => {
     const stable = { walletAddress: wallet, cash: "77", holdingsValue: "23", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T10:00:00.000Z" };
-    mocks.transactionFind.mockResolvedValue({ id: 1n, commandSnapshot: command, resultSnapshot: stable });
-    await expect(executeTrade(wallet, command)).resolves.toEqual(stable);
+    mocks.transactionFind.mockResolvedValue(ledgerRow({ commandSnapshot: command, resultSnapshot: stable }));
+    await expect(executeTrade(wallet, command)).resolves.toMatchObject({ id: "1", cashAfter: "90" });
     expect(mocks.playerUpdate).not.toHaveBeenCalled(); expect(mocks.projection).not.toHaveBeenCalled();
   });
 
   it("rejects an idempotency key reused with a different command", async () => {
-    mocks.transactionFind.mockResolvedValue({ id: 1n, commandSnapshot: { ...command, quantity: "3" }, resultSnapshot: { cash: "1" } });
+    mocks.transactionFind.mockResolvedValue(ledgerRow({ commandSnapshot: { ...command, quantity: "3" } }));
     await expect(executeTrade(wallet, command)).rejects.toMatchObject({ status: 422, code: "IDEMPOTENCY_KEY_REUSED" });
   });
 
   it.each([
-    [{ assetId: 1 }, { cash: "1" }],
-    [{ legacy: true, reason: "pre_snapshot_transaction" }, { legacy: true, reason: "pre_snapshot_transaction" }],
-    [command, { cash: 1 }],
-  ])("rejects malformed persisted JSON snapshots", async (commandSnapshot, resultSnapshot) => {
-    mocks.transactionFind.mockResolvedValue({ id: 1n, commandSnapshot, resultSnapshot });
+    [{ assetId: 1 }],
+    [{ legacy: true, reason: "pre_snapshot_transaction" }],
+  ])("rejects malformed persisted command snapshots", async (commandSnapshot) => {
+    mocks.transactionFind.mockResolvedValue(ledgerRow({ commandSnapshot }));
     await expect(executeTrade(wallet, command)).rejects.toMatchObject({ status: 500, code: "INVALID_TRADE_SNAPSHOT" });
   });
 
-  it("validates optional strings and decimal/date/status formats in snapshots", async () => {
-    const bad = { walletAddress: wallet, walletName: 7, cash: "NaN", holdingsValue: "0", netWorth: "0", pnl: "0", positions: [], assets: [{ id: "a", name: "A", nameEn: 7, category: "x", ticker: "A", currency: "USD", unit: "u", enabled: true, displayOrder: 1, usdPrice: "1e3", marketDate: "not-date", quoteStatus: "BOGUS" }], recentTransactions: [], marketAsOf: null, settlementLocked: false, updatedAt: "not-date" };
-    mocks.transactionFind.mockResolvedValue({ commandSnapshot: command, resultSnapshot: bad });
-    await expect(executeTrade(wallet, command)).rejects.toMatchObject({ status: 500, code: "INVALID_TRADE_SNAPSHOT" });
+  it("does not parse the obsolete full result snapshot during legacy replay", async () => {
+    mocks.transactionFind.mockResolvedValue(ledgerRow({ commandSnapshot: command, resultSnapshot: { cash: "NaN" } }));
+    await expect(executeTrade(wallet, command)).resolves.toMatchObject({ id: "1", cashAfter: "90" });
   });
 
   it("persists the command and stable projection in the ledger", async () => {
-    const result = await executeTrade(wallet, command);
-    expect(mocks.transactionCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ commandSnapshot: command }) }));
-    expect(mocks.transactionUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { resultSnapshot: result } }));
+    mocks.transactionCreate.mockResolvedValue(ledgerRow());
+    await expect(executeTrade(wallet, command)).resolves.toMatchObject({
+      id: "1", cashAfter: "90", quantityAfter: "2", requestedQuantity: "2",
+    });
+    expect(mocks.projection).not.toHaveBeenCalled();
+    expect(mocks.transactionUpdate).not.toHaveBeenCalled();
+    expect(mocks.transactionCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ resultSnapshot: Prisma.DbNull, requestedQuantity: "2" }),
+    }));
   });
 
   it("replays only a P2002 on the trade idempotency unique key", async () => {
     const stable = { walletAddress: wallet, cash: "90", holdingsValue: "10", netWorth: "100", pnl: "-1", positions: [], assets: [], recentTransactions: [], marketAsOf: null, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T12:00:00.000Z" };
     mocks.transaction.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002", meta: { target: ["walletAddress", "idempotencyKey"] } }));
-    mocks.replayFind.mockResolvedValue({ commandSnapshot: command, resultSnapshot: stable });
-    await expect(executeTrade(wallet, command)).resolves.toEqual(stable);
+    mocks.replayFind.mockResolvedValue(ledgerRow({ commandSnapshot: command, resultSnapshot: stable }));
+    await expect(executeTrade(wallet, command)).resolves.toMatchObject({ id: "1", cashAfter: "90" });
     mocks.transaction.mockRejectedValueOnce(Object.assign(new Error("other unique"), { code: "P2002", meta: { target: ["assetId"] } }));
     await expect(executeTrade(wallet, { ...command, idempotencyKey: "00000000-0000-4000-8000-000000000009" })).rejects.toThrow("other unique");
   });

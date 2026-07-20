@@ -1,7 +1,7 @@
 import { Prisma, type Transaction } from "@prisma/client";
-import type { AccountProjection, TransactionView } from "@/types";
+import { createHash } from "node:crypto";
+import type { TradeReceipt, TransactionView } from "@/types";
 import { isSettlementLocked } from "@/game/marketClock";
-import { getAccountProjectionInTransaction } from "./account";
 import { prisma } from "./db";
 import { ApiError } from "./http/errors";
 import { isQuoteFresh } from "./quoteFreshness";
@@ -46,25 +46,7 @@ function storedCommand(value: unknown): TradeCommand {
   return { assetId: value.assetId, side: value.side, quantity: value.quantity, idempotencyKey: value.idempotencyKey };
 }
 
-function isStringOrNull(value: unknown): value is string | null { return typeof value === "string" || value === null; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-function isOptionalString(value: unknown): boolean { return value === undefined || value === null || typeof value === "string"; }
-function isDecimalString(value: unknown): value is string { return typeof value === "string" && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value); }
-function isDateString(value: unknown): value is string { return typeof value === "string" && Number.isFinite(Date.parse(value)); }
-function projectionSnapshot(value: unknown): AccountProjection {
-  if (!isRecord(value)
-    || typeof value.walletAddress !== "string" || !isStringOrNull(value.walletName ?? null)
-    || !isDecimalString(value.cash) || !isDecimalString(value.holdingsValue) || !isDecimalString(value.netWorth) || !isDecimalString(value.pnl)
-    || !Array.isArray(value.positions) || !Array.isArray(value.assets) || !Array.isArray(value.recentTransactions)
-    || !(value.marketAsOf === null || isDateString(value.marketAsOf)) || typeof value.settlementLocked !== "boolean" || typeof value.resetEnabled !== "boolean" || !isDateString(value.updatedAt)) {
-    throw new ApiError(500, "INVALID_TRADE_SNAPSHOT", "Stored trade result is invalid");
-  }
-  const validPositions = value.positions.every((item) => isRecord(item) && typeof item.assetId === "string" && isDecimalString(item.quantity) && isDecimalString(item.costBasis) && (item.marketValue === null || isDecimalString(item.marketValue)) && (item.unrealizedPnl === null || isDecimalString(item.unrealizedPnl)));
-  const validAssets = value.assets.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string" && isOptionalString(item.nameEn) && typeof item.category === "string" && isOptionalString(item.subCategory) && typeof item.ticker === "string" && typeof item.currency === "string" && typeof item.unit === "string" && isOptionalString(item.unitEn) && typeof item.enabled === "boolean" && Number.isInteger(item.displayOrder) && (item.usdPrice === null || isDecimalString(item.usdPrice)) && (item.marketDate === null || isDateString(item.marketDate)) && ["ACTIVE", "STALE", "ERROR", "MISSING"].includes(String(item.quoteStatus)));
-  const validTransactions = value.recentTransactions.every((item) => isRecord(item) && /^\d+$/.test(String(item.id)) && ["BUY", "SELL", "RESET"].includes(String(item.type)) && isStringOrNull(item.assetId) && (item.quantity === null || isDecimalString(item.quantity)) && (item.usdUnitPrice === null || isDecimalString(item.usdUnitPrice)) && isDecimalString(item.usdAmount) && isDateString(item.createdAt));
-  if (!validPositions || !validAssets || !validTransactions) throw new ApiError(500, "INVALID_TRADE_SNAPSHOT", "Stored trade result is invalid");
-  return value as unknown as AccountProjection;
-}
 
 function assertDecimal(value: Prisma.Decimal, max: Prisma.Decimal, scale: number): void {
   if (!value.isFinite() || value.abs().gt(max) || value.decimalPlaces() > scale) {
@@ -77,13 +59,37 @@ function money(value: Prisma.Decimal): Prisma.Decimal {
   return value.toDecimalPlaces(8, Prisma.Decimal.ROUND_HALF_UP);
 }
 
-function replay(row: { commandSnapshot: Prisma.JsonValue; resultSnapshot: Prisma.JsonValue }, command: TradeCommand): AccountProjection {
-  const original = storedCommand(row.commandSnapshot);
-  if (original.assetId !== command.assetId || original.side !== command.side || original.quantity !== command.quantity || original.idempotencyKey !== command.idempotencyKey) throw new ApiError(422, "IDEMPOTENCY_KEY_REUSED", "Idempotency key was already used for another command");
-  return projectionSnapshot(row.resultSnapshot);
+const tradeFingerprint = (command: TradeCommand) =>
+  createHash("sha256").update(`TRADE|${command.assetId}|${command.side}|${command.quantity}`).digest("hex");
+
+type ReceiptRow = Pick<Transaction, "id" | "idempotencyKey" | "type" | "assetId" | "requestedQuantity" | "quantity" | "usdUnitPrice" | "usdAmount" | "cashBefore" | "cashAfter" | "quantityBefore" | "quantityAfter" | "costBasisBefore" | "costBasisAfter" | "marketDate" | "createdAt">;
+
+function receipt(row: ReceiptRow, requestedQuantity?: string): TradeReceipt {
+  if ((row.type !== "BUY" && row.type !== "SELL") || !row.assetId || !row.quantity || !row.usdUnitPrice || !row.quantityBefore || !row.quantityAfter || !row.costBasisBefore || !row.costBasisAfter || !row.marketDate) {
+    throw new ApiError(500, "INVALID_TRADE_RECEIPT", "Stored trade receipt is invalid");
+  }
+  return {
+    id: row.id.toString(), idempotencyKey: row.idempotencyKey, side: row.type, assetId: row.assetId,
+    requestedQuantity: row.requestedQuantity ?? requestedQuantity ?? row.quantity.toString(),
+    quantity: row.quantity.toString(), usdUnitPrice: row.usdUnitPrice.toString(), usdAmount: row.usdAmount.toString(),
+    cashBefore: row.cashBefore.toString(), cashAfter: row.cashAfter.toString(),
+    quantityBefore: row.quantityBefore.toString(), quantityAfter: row.quantityAfter.toString(),
+    costBasisBefore: row.costBasisBefore.toString(), costBasisAfter: row.costBasisAfter.toString(),
+    marketDate: row.marketDate.toISOString(), createdAt: row.createdAt.toISOString(),
+  };
 }
 
-export async function executeTrade(walletAddress: string, command: TradeCommand): Promise<AccountProjection> {
+function replay(row: ReceiptRow & { commandSnapshot: Prisma.JsonValue | null; requestFingerprint: string | null }, command: TradeCommand): TradeReceipt {
+  if (row.requestFingerprint) {
+    if (row.requestFingerprint !== tradeFingerprint(command)) throw new ApiError(422, "IDEMPOTENCY_KEY_REUSED", "Idempotency key was already used for another command");
+    return receipt(row, command.quantity);
+  }
+  const original = storedCommand(row.commandSnapshot);
+  if (original.assetId !== command.assetId || original.side !== command.side || original.quantity !== command.quantity || original.idempotencyKey !== command.idempotencyKey) throw new ApiError(422, "IDEMPOTENCY_KEY_REUSED", "Idempotency key was already used for another command");
+  return receipt(row, original.quantity);
+}
+
+export async function executeTrade(walletAddress: string, command: TradeCommand): Promise<TradeReceipt> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
       const result = await prisma.$transaction(async (tx) => {
@@ -139,15 +145,15 @@ export async function executeTrade(walletAddress: string, command: TradeCommand)
         await tx.player.update({ where: { walletAddress }, data: { cash: cashAfter } });
         const ledger = await tx.transaction.create({ data: {
           walletAddress, idempotencyKey: command.idempotencyKey, type: command.side, assetId: command.assetId,
-          commandSnapshot: command as unknown as Prisma.InputJsonValue,
-          resultSnapshot: {},
+          commandSnapshot: Prisma.DbNull,
+          resultSnapshot: Prisma.DbNull,
+          requestedQuantity: command.quantity,
+          requestFingerprint: tradeFingerprint(command),
           quantity, nativePrice: quote.nativePrice, currency: quote.currency, fxRateToUsd: quote.fxRateToUsd,
           usdUnitPrice: price, usdAmount: amount, cashBefore: player.cash, cashAfter,
           quantityBefore, quantityAfter, costBasisBefore: costBefore, costBasisAfter: costAfter, marketDate: quote.marketDate,
-        }, select: { id: true } });
-        const snapshot = await getAccountProjectionInTransaction(tx, walletAddress);
-        await tx.transaction.update({ where: { id: ledger.id }, data: { resultSnapshot: snapshot as unknown as Prisma.InputJsonValue } });
-        return snapshot;
+        } });
+        return receipt(ledger);
       }, { isolationLevel: "Serializable" });
       return result;
     } catch (error) {

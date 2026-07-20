@@ -1,4 +1,4 @@
-import type { AccountProjection, ApiErrorBody, LeaderboardSnapshot, MarketProjection, TransactionView } from "@/types";
+import type { AccountProjection, ApiErrorBody, LeaderboardSnapshot, MarketProjection, TradeReceipt, TransactionView } from "@/types";
 
 export interface SessionView { walletAddress: string; walletName: string | null }
 export interface TradeInput { assetId: string; side: "BUY" | "SELL"; quantity: string; idempotencyKey: string }
@@ -79,6 +79,17 @@ function market(value: unknown): MarketProjection {
   return value as unknown as MarketProjection;
 }
 
+function tradeReceipt(value: unknown): TradeReceipt {
+  if (!record(value)) return invalidResponse("Trade receipt is missing");
+  const decimals = ["quantity", "usdUnitPrice", "usdAmount", "cashBefore", "cashAfter", "quantityBefore", "quantityAfter", "costBasisBefore", "costBasisAfter"];
+  if (typeof value.id !== "string" || typeof value.idempotencyKey !== "string" || (value.side !== "BUY" && value.side !== "SELL")
+    || typeof value.assetId !== "string" || typeof value.requestedQuantity !== "string"
+    || decimals.some((key) => !decimal(value[key])) || typeof value.marketDate !== "string" || typeof value.createdAt !== "string") {
+    return invalidResponse("Trade receipt is malformed");
+  }
+  return value as unknown as TradeReceipt;
+}
+
 const json = (method: string, body?: unknown): RequestInit => ({
   method,
   credentials: "same-origin",
@@ -106,7 +117,7 @@ export async function logout(): Promise<void> {
 
 export const getGame = async (): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game", json("GET"))));
 export const getMarket = async (): Promise<MarketProjection> => market(await response<unknown>(fetch("/api/market", json("GET"))));
-export const submitTrade = async (command: TradeInput): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/trades", json("POST", command))));
+export const submitTrade = async (command: TradeInput): Promise<TradeReceipt> => tradeReceipt(await response<unknown>(fetch("/api/trades", json("POST", command))));
 export const resetGame = async (idempotencyKey: string): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game/reset", json("POST", { idempotencyKey }))));
 export const getTransactions = async (cursor?: string, limit = 50): Promise<TransactionPage> => {
   const params = new URLSearchParams({ limit: String(limit) });

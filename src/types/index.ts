@@ -62,6 +62,35 @@ export interface AccountProjection {
   updatedAt: string;
 }
 
+export type AccountState = Omit<AccountProjection, "assets" | "marketAsOf">;
+
+export interface TradeReceipt {
+  id: string;
+  idempotencyKey: string;
+  side: "BUY" | "SELL";
+  assetId: string;
+  requestedQuantity: string;
+  quantity: DecimalString;
+  usdUnitPrice: DecimalString;
+  usdAmount: DecimalString;
+  cashBefore: DecimalString;
+  cashAfter: DecimalString;
+  quantityBefore: DecimalString;
+  quantityAfter: DecimalString;
+  costBasisBefore: DecimalString;
+  costBasisAfter: DecimalString;
+  marketDate: string;
+  createdAt: string;
+}
+
+export interface ResetReceipt {
+  id: string;
+  idempotencyKey: string;
+  cashBefore: DecimalString;
+  cashAfter: DecimalString;
+  createdAt: string;
+}
+
 export interface MarketProjection {
   assets: AssetView[];
   marketAsOf: string | null;

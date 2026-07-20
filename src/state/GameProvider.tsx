@@ -5,7 +5,8 @@ import * as defaultApi from "@/client/gameApi";
 import type { MessageSigner, SessionView, TradeInput, TransactionPage } from "@/client/gameApi";
 import { ALL_SUBCATEGORY } from "@/data/categories";
 import { isSettlementLocked } from "@/game/marketClock";
-import type { AccountProjection, GameState, LeaderboardSnapshot, Locale, MarketProjection, SortMode } from "@/types";
+import type { AccountProjection, GameState, LeaderboardSnapshot, Locale, MarketProjection, SortMode, TradeReceipt } from "@/types";
+import { applyTradeReceipt } from "./applyReceipt";
 
 export interface GameApi {
   getSession(): Promise<SessionView | null>;
@@ -13,7 +14,7 @@ export interface GameApi {
   loginWithSignature(address: string, walletName: string | null, signer: MessageSigner): Promise<SessionView>;
   logout(): Promise<void>;
   getGame(): Promise<AccountProjection>;
-  submitTrade(command: TradeInput): Promise<AccountProjection>;
+  submitTrade(command: TradeInput): Promise<TradeReceipt | AccountProjection>;
   resetGame(idempotencyKey: string): Promise<AccountProjection>;
   getTransactions(cursor?: string, limit?: number): Promise<TransactionPage>;
   getLeaderboard(): Promise<LeaderboardSnapshot>;
@@ -145,7 +146,20 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
     } catch (error) { fail(error, token.epoch); }
     finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
   }, [account, fail]);
-  const trade = useCallback((assetId: string, side: "BUY" | "SELL", quantity: string | "MAX") => command("trade", () => api.submitTrade({ assetId, side, quantity, idempotencyKey: idempotencyKey() })), [api, command]);
+  const trade = useCallback(async (assetId: string, side: "BUY" | "SELL", quantity: string | "MAX") => {
+    if (!account || !market || pendingRef.current) return;
+    const token = { kind: "trade" as const, epoch: epochRef.current };
+    pendingRef.current = token;
+    setPendingCommand("trade"); setLastError(null);
+    try {
+      const result = await api.submitTrade({ assetId, side, quantity, idempotencyKey: idempotencyKey() });
+      if (mountedRef.current && token.epoch === epochRef.current) {
+        if ("walletAddress" in result) setAccount(result);
+        else setAccount((current) => current ? applyTradeReceipt(current, market, result) : current);
+      }
+    } catch (error) { fail(error, token.epoch); }
+    finally { if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); } }
+  }, [account, api, fail, market]);
   const explicitQuantity = useCallback((assetId: string, side: "BUY" | "SELL", value: string) => {
     if (!/^[1-9]\d*$/.test(value)) { setLastError("INVALID_QUANTITY"); return Promise.resolve(); }
     return trade(assetId, side, value);
