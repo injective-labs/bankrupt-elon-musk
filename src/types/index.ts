@@ -62,6 +62,11 @@ export interface AccountProjection {
   updatedAt: string;
 }
 
+export interface MarketProjection {
+  assets: AssetView[];
+  marketAsOf: string | null;
+}
+
 export interface ApiErrorBody {
   error: {
     code: string;
