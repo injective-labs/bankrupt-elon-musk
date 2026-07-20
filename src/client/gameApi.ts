@@ -1,4 +1,4 @@
-import type { AccountProjection, ApiErrorBody, LeaderboardSnapshot, TransactionView } from "@/types";
+import type { AccountProjection, ApiErrorBody, LeaderboardSnapshot, MarketProjection, TransactionView } from "@/types";
 
 export interface SessionView { walletAddress: string; walletName: string | null }
 export interface TradeInput { assetId: string; side: "BUY" | "SELL"; quantity: string; idempotencyKey: string }
@@ -72,6 +72,13 @@ function account(value: unknown): AccountProjection {
   return value as AccountProjection;
 }
 
+function market(value: unknown): MarketProjection {
+  if (!record(value) || !Array.isArray(value.assets) || !value.assets.every(validAsset) || !stringOrNull(value.marketAsOf)) {
+    return invalidResponse("Market response is malformed");
+  }
+  return value as unknown as MarketProjection;
+}
+
 const json = (method: string, body?: unknown): RequestInit => ({
   method,
   credentials: "same-origin",
@@ -98,6 +105,7 @@ export async function logout(): Promise<void> {
 }
 
 export const getGame = async (): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game", json("GET"))));
+export const getMarket = async (): Promise<MarketProjection> => market(await response<unknown>(fetch("/api/market", json("GET"))));
 export const submitTrade = async (command: TradeInput): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/trades", json("POST", command))));
 export const resetGame = async (idempotencyKey: string): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game/reset", json("POST", { idempotencyKey }))));
 export const getTransactions = async (cursor?: string, limit = 50): Promise<TransactionPage> => {

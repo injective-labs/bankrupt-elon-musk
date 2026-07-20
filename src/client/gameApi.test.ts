@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getGame, getLeaderboard, getSession, getTransactions, loginWithSignature, logout } from "./gameApi";
+import { getGame, getLeaderboard, getMarket, getSession, getTransactions, loginWithSignature, logout } from "./gameApi";
 
 const json = (body: unknown, status = 200) => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
@@ -37,5 +37,22 @@ describe("gameApi", () => {
     await expect(logout()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
     await expect(getTransactions()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
     await expect(getLeaderboard()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("validates exact decimal strings in the public market response", async () => {
+    const market = {
+      assets: [{
+        id: "asset", name: "资产", category: "美股", ticker: "AST",
+        currency: "USD", unit: "股", enabled: true, displayOrder: 1,
+        usdPrice: "12.25", marketDate: "2026-07-20T00:00:00.000Z", quoteStatus: "ACTIVE",
+      }],
+      marketAsOf: "2026-07-20T00:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(json(market))
+      .mockResolvedValueOnce(json({ ...market, assets: [{ ...market.assets[0], usdPrice: 12.25 }] })));
+
+    await expect(getMarket()).resolves.toEqual(market);
+    await expect(getMarket()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 });

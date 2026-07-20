@@ -5,10 +5,11 @@ import * as defaultApi from "@/client/gameApi";
 import type { MessageSigner, SessionView, TradeInput, TransactionPage } from "@/client/gameApi";
 import { ALL_SUBCATEGORY } from "@/data/categories";
 import { isSettlementLocked } from "@/game/marketClock";
-import type { AccountProjection, GameState, LeaderboardSnapshot, Locale, SortMode } from "@/types";
+import type { AccountProjection, GameState, LeaderboardSnapshot, Locale, MarketProjection, SortMode } from "@/types";
 
 export interface GameApi {
   getSession(): Promise<SessionView | null>;
+  getMarket(): Promise<MarketProjection>;
   loginWithSignature(address: string, walletName: string | null, signer: MessageSigner): Promise<SessionView>;
   logout(): Promise<void>;
   getGame(): Promise<AccountProjection>;
@@ -53,17 +54,20 @@ export interface GameActions {
   logout(): Promise<boolean>;
   buy(id: string): Promise<void>; buyQty(id: string, quantity: string): Promise<void>; buyMax(id: string): Promise<void>;
   sell(id: string): Promise<void>; sellQty(id: string, quantity: string): Promise<void>; sellAll(id: string): Promise<void>;
-  reset(): Promise<void>; refreshPricesNow(): Promise<void>;
+  reset(): Promise<void>; refreshPricesNow(): Promise<void>; retryMarket(): Promise<void>;
   toggleSound(): void; toggleLocale(): void; setCategory(category: string): void; setSubcategory(subcategory: string): void; setSearch(search: string): void; setSort(sort: SortMode): void; focusProduct(id: string): void;
 }
 
-interface GameContextValue { authStatus: AuthStatus; account: AccountProjection | null; clockNow: Date; tradingLocked: boolean; leaderboard: LeaderboardSnapshot | null; leaderboardStatus: "idle" | "loading" | "loaded" | "error"; leaderboardError: boolean; state: GameState; actions: GameActions; pendingCommand: PendingCommand | null; lastError: string | null; focusedProductId: string | null; flashTick: number; ready: boolean }
+interface GameContextValue { authStatus: AuthStatus; account: AccountProjection | null; market: MarketProjection | null; marketStatus: "loading" | "loaded" | "error"; marketError: boolean; clockNow: Date; tradingLocked: boolean; leaderboard: LeaderboardSnapshot | null; leaderboardStatus: "idle" | "loading" | "loaded" | "error"; leaderboardError: boolean; state: GameState; actions: GameActions; pendingCommand: PendingCommand | null; lastError: string | null; focusedProductId: string | null; flashTick: number; ready: boolean }
 const GameContext = createContext<GameContextValue | null>(null);
 export function useGame() { const value = useContext(GameContext); if (!value) throw new Error("useGame must be used within GameProvider"); return value; }
 
 export function GameProvider({ children, api = defaultApi }: { children: ReactNode; api?: GameApi }) {
   const [authStatus, setAuthStatus] = useState<AuthStatus>("loading");
   const [account, setAccount] = useState<AccountProjection | null>(null);
+  const [market, setMarket] = useState<MarketProjection | null>(null);
+  const [marketStatus, setMarketStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [marketError, setMarketError] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardSnapshot | null>(null);
   const [leaderboardError, setLeaderboardError] = useState(false);
   const [leaderboardStatus, setLeaderboardStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
@@ -76,6 +80,7 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   const mountedRef = useRef(true);
   const pendingRef = useRef<{ kind: PendingCommand; epoch: number } | null>(null);
   const authTransitionRef = useRef<symbol | null>(null);
+  const marketRequestRef = useRef(0);
 
   const fail = useCallback((error: unknown, epoch: number) => {
     if (!mountedRef.current || epoch !== epochRef.current) return;
@@ -94,11 +99,31 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
     const next = await api.getGame();
     if (!mountedRef.current || epoch !== epochRef.current) return;
     setAccount(next);
+    setMarket({ assets: next.assets, marketAsOf: next.marketAsOf });
+    setMarketStatus("loaded");
+    setMarketError(false);
     setAuthStatus("authenticated");
+  }, [api]);
+
+  const loadMarket = useCallback(async () => {
+    const request = ++marketRequestRef.current;
+    setMarketStatus("loading");
+    setMarketError(false);
+    try {
+      const next = await api.getMarket();
+      if (!mountedRef.current || request !== marketRequestRef.current) return;
+      setMarket(next);
+      setMarketStatus("loaded");
+    } catch {
+      if (!mountedRef.current || request !== marketRequestRef.current) return;
+      setMarketError(true);
+      setMarketStatus("error");
+    }
   }, [api]);
 
   useEffect(() => {
     mountedRef.current = true;
+    void loadMarket();
     const epoch = epochRef.current;
     void api.getSession().then(async (session) => {
       if (!mountedRef.current || epoch !== epochRef.current) return;
@@ -107,7 +132,7 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
       catch (error) { if (mountedRef.current && epoch === epochRef.current) { fail(error, epoch); if (!errorInfo(error).expired) setAuthStatus("locked"); } }
     }).catch((error) => { if (mountedRef.current && epoch === epochRef.current) { fail(error, epoch); setAuthStatus("locked"); } });
     return () => { mountedRef.current = false; epochRef.current += 1; pendingRef.current = null; authTransitionRef.current = null; };
-  }, [api, fail, loadGame]);
+  }, [api, fail, loadGame, loadMarket]);
 
   const command = useCallback(async (kind: PendingCommand, run: () => Promise<AccountProjection>) => {
     if (!account || pendingRef.current) return;
@@ -154,11 +179,11 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
     buy: (id) => explicitQuantity(id, "BUY", "1"), buyQty: (id, amount) => explicitQuantity(id, "BUY", amount),
     buyMax: (id) => trade(id, "BUY", "MAX"),
     sell: (id) => explicitQuantity(id, "SELL", "1"), sellQty: (id, amount) => explicitQuantity(id, "SELL", amount), sellAll: (id) => trade(id, "SELL", "MAX"),
-    reset: () => command("reset", () => api.resetGame(idempotencyKey())), refreshPricesNow: () => command("refresh", api.getGame),
+    reset: () => command("reset", () => api.resetGame(idempotencyKey())), refreshPricesNow: () => command("refresh", api.getGame), retryMarket: loadMarket,
     toggleSound: () => setPreferences((p) => ({ ...p, sound: !p.sound })), toggleLocale: () => setPreferences((p) => ({ ...p, locale: p.locale === "zh" ? "en" : "zh" })),
     setCategory: (selectedCategory) => setPreferences((p) => ({ ...p, selectedCategory, selectedSubcategory: ALL_SUBCATEGORY })), setSubcategory: (selectedSubcategory) => setPreferences((p) => ({ ...p, selectedSubcategory })), setSearch: (search) => setPreferences((p) => ({ ...p, search })), setSort: (sort) => setPreferences((p) => ({ ...p, sort })),
     focusProduct: (id) => { setFocusedProductId(id); requestAnimationFrame(() => document.querySelector(`[data-product-id="${id}"]`)?.scrollIntoView?.({ block: "center" })); },
-  }), [api, command, explicitQuantity, fail, loadGame, trade]);
+  }), [api, command, explicitQuantity, fail, loadGame, loadMarket, trade]);
 
   const state = useMemo(() => projectionState(preferences), [preferences]);
   useEffect(() => { const update = () => setClockNow(new Date()); update(); const id = setInterval(update, 1000); return () => clearInterval(id); }, []);
@@ -170,5 +195,5 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
     void Promise.resolve(api.getLeaderboard()).then((value) => { if (active && value) { setLeaderboard(value); setLeaderboardStatus("loaded"); } }).catch(() => { if (active) { setLeaderboard(null); setLeaderboardError(true); setLeaderboardStatus("error"); } });
     return () => { active = false; };
   }, [api, authStatus, account?.updatedAt]);
-  return <GameContext.Provider value={{ authStatus, account, clockNow, tradingLocked, leaderboard, leaderboardStatus, leaderboardError, state, actions, pendingCommand, lastError, focusedProductId, flashTick: 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;
+  return <GameContext.Provider value={{ authStatus, account, market, marketStatus, marketError, clockNow, tradingLocked, leaderboard, leaderboardStatus, leaderboardError, state, actions, pendingCommand, lastError, focusedProductId, flashTick: 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;
 }

@@ -24,7 +24,7 @@ describe("ConnectButton", () => {
   it("shows restored server identity and can log out without a connector wallet", async () => {
     const logout = vi.fn().mockResolvedValue(undefined);
     const api: GameApi = {
-      getSession: vi.fn().mockResolvedValue({ walletAddress: account.walletAddress, walletName: account.walletName }), loginWithSignature: vi.fn(), logout,
+      getSession: vi.fn().mockResolvedValue({ walletAddress: account.walletAddress, walletName: account.walletName }), getMarket: vi.fn().mockResolvedValue({ assets: [], marketAsOf: null }), loginWithSignature: vi.fn(), logout,
       getGame: vi.fn().mockResolvedValue(account), submitTrade: vi.fn(), resetGame: vi.fn(), getTransactions: vi.fn(), getLeaderboard: vi.fn(),
     };
     render(<GameProvider api={api}><ConnectButton /></GameProvider>);
@@ -38,7 +38,7 @@ describe("ConnectButton", () => {
   it("keeps the connector attached when server logout fails", async () => {
     connector = { status: "connected", wallet: { address: account.walletAddress, walletName: "connector" }, error: null };
     const api: GameApi = {
-      getSession: vi.fn().mockResolvedValue({ walletAddress: account.walletAddress, walletName: account.walletName }), loginWithSignature: vi.fn(), logout: vi.fn().mockRejectedValue(new Error("LOGOUT_FAILED")),
+      getSession: vi.fn().mockResolvedValue({ walletAddress: account.walletAddress, walletName: account.walletName }), getMarket: vi.fn().mockResolvedValue({ assets: [], marketAsOf: null }), loginWithSignature: vi.fn(), logout: vi.fn().mockRejectedValue(new Error("LOGOUT_FAILED")),
       getGame: vi.fn().mockResolvedValue(account), submitTrade: vi.fn(), resetGame: vi.fn(), getTransactions: vi.fn(), getLeaderboard: vi.fn(),
     };
     render(<GameProvider api={api}><ConnectButton /></GameProvider>);

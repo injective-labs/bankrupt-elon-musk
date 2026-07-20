@@ -32,6 +32,7 @@ function deferred<T>() {
 function api(overrides: Partial<GameApi> = {}): GameApi {
   return {
     getSession: vi.fn().mockResolvedValue(null),
+    getMarket: vi.fn().mockResolvedValue({ assets: [], marketAsOf: null }),
     loginWithSignature: vi.fn(),
     logout: vi.fn().mockResolvedValue(undefined),
     getGame: vi.fn(),
@@ -50,6 +51,8 @@ function Probe() {
     <output data-testid="cash">{game.account?.cash ?? "none"}</output>
     <output data-testid="pending">{game.pendingCommand ?? "none"}</output>
     <output data-testid="error">{game.lastError ?? "none"}</output>
+    <output data-testid="market-count">{game.market?.assets.length ?? 0}</output>
+    <output data-testid="market-status">{game.marketStatus}</output>
     <button onClick={() => void game.actions.login("0x1111111111111111111111111111111111111111", "tester", async () => new Uint8Array([1, 2]))}>login</button>
     <button onClick={() => void game.actions.buyQty("asset", "2")}>buy</button>
     <button onClick={() => void game.actions.buyQty("asset", "9007199254740993125")}>buy-exact</button>
@@ -74,6 +77,24 @@ describe("GameProvider", () => {
     expect(client.getGame).not.toHaveBeenCalled();
     expect(getItem).not.toHaveBeenCalled();
     expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it("loads public market without a session and preserves it through failed login", async () => {
+    const publicMarket = {
+      assets: [{ id: "asset", name: "资产", category: "美股", ticker: "AST", currency: "USD", unit: "股", enabled: true, displayOrder: 1, usdPrice: "12.25", marketDate: "2026-07-20T00:00:00.000Z", quoteStatus: "ACTIVE" as const }],
+      marketAsOf: "2026-07-20T00:00:00.000Z",
+    };
+    const client = api({
+      getMarket: vi.fn().mockResolvedValue(publicMarket),
+      loginWithSignature: vi.fn().mockRejectedValue(new Error("cancelled")),
+    });
+
+    render(<GameProvider api={client}><Probe /></GameProvider>);
+    await waitFor(() => expect(screen.getByTestId("market-count")).toHaveTextContent("1"));
+    expect(screen.getByTestId("market-status")).toHaveTextContent("loaded");
+    await act(async () => screen.getByText("login").click());
+    expect(screen.getByTestId("status")).toHaveTextContent("locked");
+    expect(screen.getByTestId("market-count")).toHaveTextContent("1");
   });
 
   it("loads the account for a valid cookie session", async () => {
