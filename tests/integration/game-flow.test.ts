@@ -4,6 +4,8 @@ import { privateKeyToAccount } from "viem/accounts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST as createNonce } from "@/../app/api/auth/nonce/route";
+import { POST as logout } from "@/../app/api/auth/logout/route";
+import { GET as getSession } from "@/../app/api/auth/session/route";
 import { POST as verifyWallet } from "@/../app/api/auth/verify/route";
 import { GET as getGame } from "@/../app/api/game/route";
 import { POST as resetGame } from "@/../app/api/game/reset/route";
@@ -125,6 +127,43 @@ describeDatabase("migrated authenticated game flow (PostgreSQL)", () => {
 
     expect(secondLogin.status).toBe(200);
     expect((await prisma.player.findUniqueOrThrow({ where: { walletAddress: account.address } })).cash.toString()).toBe("49999999900");
+  });
+
+  it("creates, reads, and clears the authenticated session", async () => {
+    const nonceResponse = await createNonce(new Request("http://localhost/api/auth/nonce", {
+      method: "POST",
+      body: JSON.stringify({ address: account.address }),
+    }));
+    const nonce = await nonceResponse.json() as { message: string };
+    const signature = await account.signMessage({ message: nonce.message });
+    const verifyResponse = await verifyWallet(new Request("http://localhost/api/auth/verify", {
+      method: "POST",
+      body: JSON.stringify({ address: account.address, signature, walletName: "task11.inj" }),
+    }));
+    const setCookie = verifyResponse.headers.get("set-cookie");
+    const sessionCookie = setCookie?.split(";", 1)[0];
+
+    expect(verifyResponse.status).toBe(200);
+    expect(sessionCookie).toMatch(/^musk_session=.+/);
+
+    const sessionResponse = await getSession(authenticated(
+      "http://localhost/api/auth/session",
+      sessionCookie!,
+    ));
+    expect(sessionResponse.status).toBe(200);
+    expect(await sessionResponse.json()).toEqual({
+      walletAddress: account.address,
+      walletName: "task11.inj",
+    });
+
+    const logoutResponse = await logout();
+    expect(logoutResponse.status).toBe(200);
+    expect(await logoutResponse.json()).toEqual({ ok: true });
+    expect(logoutResponse.headers.get("set-cookie")).toMatch(/^musk_session=;.*Max-Age=0/i);
+
+    const unauthenticatedGame = await getGame(new Request("http://localhost/api/game"));
+    expect(unauthenticatedGame.status).toBe(401);
+    expect(await unauthenticatedGame.json()).toMatchObject({ error: { code: "UNAUTHORIZED" } });
   });
 
   it("atomically commits Player, Position, and Transaction and reloads the database projection", async () => {
