@@ -213,8 +213,8 @@ function ProductCardBase({
   onOpenTicket,
   onCloseTicket,
 }: ProductCardProps) {
-  const { account, clockNow, authStatus, tradingLocked, pendingCommand, actions } = useGame();
-  const asset = account?.assets.find((item) => item.id === product.id);
+  const { account, market, clockNow, authStatus, tradingLocked, pendingCommand, actions } = useGame();
+  const asset = (account?.assets ?? market?.assets)?.find((item) => item.id === product.id);
   const authoritativeOwned = account?.positions.find((item) => item.assetId === product.id)?.quantity;
   const quoteStatus = asset?.quoteStatus === "ACTIVE" && asset.marketDate && !isQuoteFresh(asset.marketDate, clockNow) ? "STALE" : asset?.quoteStatus ?? "MISSING";
   const tradeDisabled = authStatus !== "authenticated" || pendingCommand !== null || tradingLocked || !asset?.enabled || quoteStatus !== "ACTIVE" || asset.usdPrice === null;

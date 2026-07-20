@@ -10,6 +10,7 @@ import { FxTicker } from "./FxTicker";
 import { SessionBar } from "./SessionBar";
 import { PortfolioPanel } from "./PortfolioPanel";
 import { MarketPanel } from "./MarketPanel";
+import { GuestPortfolioPanel } from "./GuestPortfolioPanel";
 
 function GameShell() {
   const { state, authStatus, lastError } = useGame();
@@ -19,24 +20,15 @@ function GameShell() {
     document.title = t(state.locale, "brandTitle");
   }, [state.locale]);
 
-  if (authStatus !== "authenticated") {
-    return <main className="app-shell" data-auth-state={authStatus}>
-      <section className="panel" aria-busy={authStatus === "loading"}>
-        <h1>{t(state.locale, "brandTitle")}</h1>
-        {authStatus === "loading" ? <p>{t(state.locale, "accountSyncing")}</p> : <ConnectButton />}
-        {authStatus === "expired" && <p role="alert">{t(state.locale, "error.UNAUTHORIZED")}</p>}
-        {lastError && <p role="alert">{errorText(state.locale, lastError)}</p>}
-      </section>
-    </main>;
-  }
-
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-auth-state={authStatus}>
       <TopBar />
+      {authStatus === "expired" && <p role="alert">{t(state.locale, "error.UNAUTHORIZED")}</p>}
+      {lastError && <p role="alert">{errorText(state.locale, lastError)}</p>}
       <FxTicker />
       <SessionBar />
       <main className="dashboard-grid">
-        <PortfolioPanel />
+        {authStatus === "authenticated" ? <PortfolioPanel /> : <GuestPortfolioPanel />}
         <MarketPanel />
       </main>
     </div>

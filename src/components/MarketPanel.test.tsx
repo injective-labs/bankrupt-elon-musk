@@ -24,4 +24,21 @@ describe("MarketPanel server asset catalog", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "数据库资产" })).toBeInTheDocument());
     expect(screen.queryByRole("heading", { name: "已下架持仓" })).not.toBeInTheDocument();
   });
+
+  it("renders real public quotes without creating or loading an account", async () => {
+    const getGame = vi.fn();
+    const guestApi: GameApi = {
+      ...api,
+      getSession: vi.fn().mockResolvedValue(null),
+      getMarket: vi.fn().mockResolvedValue({ assets: [dbOnly], marketAsOf: dbOnly.marketDate }),
+      getGame,
+    };
+
+    render(<GameProvider api={guestApi}><MarketPanel /></GameProvider>);
+
+    expect(await screen.findByRole("heading", { name: "数据库资产" })).toBeInTheDocument();
+    expect(screen.getByText("$3.50")).toBeInTheDocument();
+    expect(screen.getByRole("searchbox")).toBeInTheDocument();
+    expect(getGame).not.toHaveBeenCalled();
+  });
 });

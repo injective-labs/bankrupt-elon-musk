@@ -287,6 +287,31 @@ button:disabled {
   box-shadow: 0 14px 34px rgba(23, 33, 29, 0.08);
 }
 
+.guest-portfolio {
+  align-self: start;
+}
+
+.guest-hero {
+  margin: 16px;
+  padding: 20px;
+  border: 1px solid rgba(13, 148, 136, 0.22);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(13, 148, 136, 0.09), rgba(255, 255, 255, 0.72));
+}
+
+.guest-hero > strong { display: block; margin-bottom: 8px; font-size: 1.15rem; }
+.guest-hero > p, .guest-readonly { color: #536078; line-height: 1.6; }
+.guest-hero .wallet-chip-wrap { margin-top: 16px; }
+
+.guest-steps { display: grid; gap: 10px; margin: 8px 16px 16px; padding: 0; list-style: none; }
+.guest-steps li { display: flex; gap: 10px; align-items: center; }
+.guest-steps li > span { display: grid; flex: 0 0 28px; height: 28px; place-items: center; border-radius: 50%; background: #0f766e; color: white; font-weight: 800; }
+.guest-steps p { margin: 0; color: #344054; }
+.guest-readonly { margin: 16px; padding-top: 16px; border-top: 1px solid rgba(83, 96, 120, 0.18); }
+
+.market-load-state { margin: 24px; padding: 28px; border: 1px dashed rgba(83, 96, 120, 0.3); border-radius: 14px; text-align: center; color: #536078; }
+.market-retry { margin-top: 10px; padding: 9px 18px; border: 0; border-radius: 10px; background: #0f766e; color: white; font-weight: 800; cursor: pointer; }
+
 .panel {
   position: sticky;
   top: 14px;
