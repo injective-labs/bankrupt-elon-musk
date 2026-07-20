@@ -19,6 +19,7 @@ docker run --detach --rm \
 
 port="$(docker port "$container" 5432/tcp | sed -E 's/.*:([0-9]+)$/\1/')"
 export DATABASE_URL="postgresql://postgres:${password}@127.0.0.1:${port}/${database}?schema=public"
+export DIRECT_URL="$DATABASE_URL"
 export JWT_SECRET="integration-test-only-secret"
 export CRON_SECRET="integration-test-only-cron-secret"
 export ENABLE_GAME_RESET=true
