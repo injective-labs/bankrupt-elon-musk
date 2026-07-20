@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AccountProjection } from "@/types";
 import { GameProvider, type GameApi } from "@/state/GameProvider";
+import { InjPassProvider } from "@/wallet/InjPassProvider";
 import { MarketPanel } from "./MarketPanel";
 
 const dbOnly = { id: "database-only", name: "数据库资产", nameEn: "Database Asset", category: "另类", subCategory: "测试类", ticker: "DBX", currency: "USD", unit: "份", unitEn: "unit", enabled: true, displayOrder: 1, usdPrice: "3.5", marketDate: "2026-07-20T00:00:00.000Z", quoteStatus: "ACTIVE" as const };
@@ -14,7 +15,7 @@ const api: GameApi = { getSession: vi.fn().mockResolvedValue({ walletAddress: "0
 describe("MarketPanel server asset catalog", () => {
   afterEach(cleanup);
   it("renders and searches a DB-only asset and keeps a disabled held asset visible but locked", async () => {
-    render(<GameProvider api={api}><MarketPanel /></GameProvider>);
+    render(<InjPassProvider><GameProvider api={api}><MarketPanel /></GameProvider></InjPassProvider>);
     expect(await screen.findByRole("heading", { name: "数据库资产" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "已下架持仓" })).toBeInTheDocument();
     expect(screen.getByText(/已下架，仅展示持仓/)).toBeInTheDocument();
@@ -34,7 +35,7 @@ describe("MarketPanel server asset catalog", () => {
       getGame,
     };
 
-    render(<GameProvider api={guestApi}><MarketPanel /></GameProvider>);
+    render(<InjPassProvider><GameProvider api={guestApi}><MarketPanel /></GameProvider></InjPassProvider>);
 
     expect(await screen.findByRole("heading", { name: "数据库资产" })).toBeInTheDocument();
     expect(screen.getByText("$3.50")).toBeInTheDocument();

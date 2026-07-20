@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { GameProvider, useGame } from "@/state/GameProvider";
 import { InjPassProvider } from "@/wallet/InjPassProvider";
-import { ConnectButton } from "@/wallet/ConnectButton";
 import { errorText, t } from "@/i18n";
 import { TopBar } from "./TopBar";
 import { FxTicker } from "./FxTicker";
@@ -12,7 +11,7 @@ import { PortfolioPanel } from "./PortfolioPanel";
 import { MarketPanel } from "./MarketPanel";
 import { GuestPortfolioPanel } from "./GuestPortfolioPanel";
 
-function GameShell() {
+export function GameShell() {
   const { state, authStatus, lastError } = useGame();
 
   useEffect(() => {
