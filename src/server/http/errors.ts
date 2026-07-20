@@ -25,6 +25,7 @@ export function toErrorResponse(error: unknown): NextResponse {
     );
   }
 
+  console.error("Unhandled API error", error);
   return NextResponse.json(
     { error: { code: "INTERNAL_ERROR", message: "Internal server error" } },
     { status: 500 },
