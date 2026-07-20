@@ -10,6 +10,7 @@ import { POST as verifyWallet } from "@/../app/api/auth/verify/route";
 import { GET as getGame } from "@/../app/api/game/route";
 import { POST as resetGame } from "@/../app/api/game/reset/route";
 import { GET as getLeaderboard } from "@/../app/api/leaderboard/route";
+import { GET as getMarket } from "@/../app/api/market/route";
 import { GET as getHistory, POST as trade } from "@/../app/api/trades/route";
 import { prisma } from "@/server/db";
 
@@ -96,6 +97,20 @@ describeDatabase("migrated authenticated game flow (PostgreSQL)", () => {
     ]));
     expect(await prisma.asset.count()).toBe(160);
     expect(await prisma.assetDailyPrice.count()).toBe(0);
+  });
+
+  it("serves the seeded public market without authentication", async () => {
+    const response = await getMarket();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.assets).toHaveLength(160);
+    expect(body.assets).toContainEqual(expect.objectContaining({
+      id: assetId,
+      usdPrice: "100",
+      quoteStatus: "ACTIVE",
+    }));
+    expect(body.marketAsOf).toBe("2026-07-20T00:00:00.000Z");
   });
 
   it("funds the first wallet login once and preserves changed cash on the second login", async () => {
