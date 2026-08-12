@@ -11,6 +11,7 @@ import { PortfolioPanel } from "./PortfolioPanel";
 import { MarketPanel } from "./MarketPanel";
 import { GuestPortfolioPanel } from "./GuestPortfolioPanel";
 import { OperationToast } from "./OperationToast";
+import { InjPassAgentBridge } from "@/agentos/InjPassAgentBridge";
 
 export function GameShell() {
   const { state, authStatus } = useGame();
@@ -39,6 +40,7 @@ export function GameApp() {
   return (
     <InjPassProvider>
       <GameProvider>
+        <InjPassAgentBridge />
         <GameShell />
       </GameProvider>
     </InjPassProvider>

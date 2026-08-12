@@ -55,4 +55,37 @@ describe("gameApi", () => {
     await expect(getMarket()).resolves.toEqual(market);
     await expect(getMarket()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
+
+  it("adds an Agent bearer only when an authorization token is supplied", async () => {
+    const account = {
+      walletAddress: "0x1", walletName: null, cash: "100", holdingsValue: "0",
+      netWorth: "100", pnl: "0", positions: [], assets: [], recentTransactions: [],
+      marketAsOf: null, settlementLocked: false, resetEnabled: false,
+      updatedAt: "2026-08-12T00:00:00.000Z",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(json(account));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getGame("agent.jwt");
+    expect(fetchMock).toHaveBeenCalledWith("/api/game", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { Authorization: "Bearer agent.jwt" },
+    }));
+  });
+
+  it("forwards an abort signal to protected requests", async () => {
+    const account = {
+      walletAddress: "0x1", walletName: null, cash: "100", holdingsValue: "0",
+      netWorth: "100", pnl: "0", positions: [], assets: [], recentTransactions: [],
+      marketAsOf: null, settlementLocked: false, resetEnabled: false,
+      updatedAt: "2026-08-12T00:00:00.000Z",
+    };
+    const signal = new AbortController().signal;
+    const fetchMock = vi.fn().mockResolvedValue(json(account));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getGame("agent.jwt", signal);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/game", expect.objectContaining({ signal }));
+  });
 });

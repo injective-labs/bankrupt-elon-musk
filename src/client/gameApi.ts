@@ -1,6 +1,7 @@
 import type { AccountProjection, ApiErrorBody, LeaderboardSnapshot, MarketProjection, TradeReceipt, TransactionView } from "@/types";
 
 export interface SessionView { walletAddress: string; walletName: string | null }
+export interface AgentSessionView extends SessionView { accessToken: string; expiresIn: number }
 export interface TradeInput { assetId: string; side: "BUY" | "SELL"; quantity: string; idempotencyKey: string }
 export interface TransactionPage { rows: TransactionView[]; nextCursor: string | null }
 export type MessageSigner = (message: string) => Promise<Uint8Array>;
@@ -44,6 +45,15 @@ function challenge(value: unknown): { nonce: string; message: string } {
   const record = value as Record<string, unknown>;
   if (typeof record.nonce !== "string" || typeof record.message !== "string") return invalidResponse("Nonce response is malformed");
   return { nonce: record.nonce, message: record.message };
+}
+
+function agentSession(value: unknown): AgentSessionView {
+  if (!record(value)) return invalidResponse("Agent session response is missing");
+  const publicSession = session(value);
+  if (typeof value.accessToken !== "string" || !value.accessToken || typeof value.expiresIn !== "number" || !Number.isFinite(value.expiresIn) || value.expiresIn <= 0) {
+    return invalidResponse("Agent session response is malformed");
+  }
+  return { ...publicSession, accessToken: value.accessToken, expiresIn: value.expiresIn };
 }
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -90,10 +100,14 @@ function tradeReceipt(value: unknown): TradeReceipt {
   return value as unknown as TradeReceipt;
 }
 
-const json = (method: string, body?: unknown): RequestInit => ({
+const json = (method: string, body?: unknown, authorizationToken?: string, signal?: AbortSignal): RequestInit => ({
   method,
   credentials: "same-origin",
-  headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+  signal,
+  headers: {
+    ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    ...(authorizationToken ? { Authorization: `Bearer ${authorizationToken}` } : {}),
+  },
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
@@ -103,9 +117,25 @@ export async function getSession(): Promise<SessionView | null> {
 }
 
 export async function loginWithSignature(address: string, walletName: string | null, signMessage: MessageSigner): Promise<SessionView> {
-  const nonce = challenge(await response<unknown>(fetch("/api/auth/nonce", json("POST", { address }))));
+  const nonce = await getAuthChallenge(address);
   const signature = toHexSignature(await signMessage(nonce.message));
   return session(await response<unknown>(fetch("/api/auth/verify", json("POST", { address, walletName, signature }))));
+}
+
+export async function getAuthChallenge(address: string, signal?: AbortSignal): Promise<{ nonce: string; message: string }> {
+  return challenge(await response<unknown>(fetch("/api/auth/nonce", json("POST", { address }, undefined, signal))));
+}
+
+export async function verifyAgentSignature(
+  address: string,
+  walletName: string | null,
+  signature: string,
+  signal?: AbortSignal,
+): Promise<AgentSessionView> {
+  return agentSession(await response<unknown>(fetch(
+    "/api/auth/agent-verify",
+    json("POST", { address, walletName, signature }, undefined, signal),
+  )));
 }
 
 export async function logout(): Promise<void> {
@@ -115,19 +145,19 @@ export async function logout(): Promise<void> {
   if (!record(body) || body.ok !== true) invalidResponse("Logout response is malformed");
 }
 
-export const getGame = async (): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game", json("GET"))));
-export const getMarket = async (): Promise<MarketProjection> => market(await response<unknown>(fetch("/api/market", json("GET"))));
-export const submitTrade = async (command: TradeInput): Promise<TradeReceipt> => tradeReceipt(await response<unknown>(fetch("/api/trades", json("POST", command))));
-export const resetGame = async (idempotencyKey: string): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game/reset", json("POST", { idempotencyKey }))));
-export const getTransactions = async (cursor?: string, limit = 50): Promise<TransactionPage> => {
+export const getGame = async (authorizationToken?: string, signal?: AbortSignal): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game", json("GET", undefined, authorizationToken, signal))));
+export const getMarket = async (signal?: AbortSignal): Promise<MarketProjection> => market(await response<unknown>(fetch("/api/market", json("GET", undefined, undefined, signal))));
+export const submitTrade = async (command: TradeInput, authorizationToken?: string, signal?: AbortSignal): Promise<TradeReceipt> => tradeReceipt(await response<unknown>(fetch("/api/trades", json("POST", command, authorizationToken, signal))));
+export const resetGame = async (idempotencyKey: string, authorizationToken?: string): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game/reset", json("POST", { idempotencyKey }, authorizationToken))));
+export const getTransactions = async (cursor?: string, limit = 50, authorizationToken?: string, signal?: AbortSignal): Promise<TransactionPage> => {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
-  const value = await response<unknown>(fetch(`/api/trades?${params}`, json("GET")));
+  const value = await response<unknown>(fetch(`/api/trades?${params}`, json("GET", undefined, authorizationToken, signal)));
   if (!record(value) || !Array.isArray(value.rows) || !value.rows.every(validTransaction) || !(value.nextCursor === null || typeof value.nextCursor === "string")) invalidResponse("Transaction response is malformed");
   return value as unknown as TransactionPage;
 };
-export const getLeaderboard = async (): Promise<LeaderboardSnapshot> => {
-  const value = await response<unknown>(fetch("/api/leaderboard", json("GET")));
+export const getLeaderboard = async (authorizationToken?: string, signal?: AbortSignal): Promise<LeaderboardSnapshot> => {
+  const value = await response<unknown>(fetch("/api/leaderboard", json("GET", undefined, authorizationToken, signal)));
   const validRow = (row: unknown) => record(row) && typeof row.address === "string" && (row.walletName === undefined || stringOrNull(row.walletName)) && decimal(row.pnl) && decimal(row.netWorth);
   const validYou = (you: unknown) => you === undefined || you === null || record(you) && typeof you.rank === "number" && typeof you.total === "number" && decimal(you.pnl);
   if (!record(value) || !Array.isArray(value.top) || !value.top.every(validRow) || typeof value.total !== "number" || !validYou(value.you)) invalidResponse("Leaderboard response is malformed");

@@ -7,6 +7,10 @@ import { readSessionCookie } from "./http/sessionCookie";
 
 const NONCE_TTL_MS = 5 * 60 * 1000;
 const TOKEN_TTL = "7d";
+export const AGENT_AUDIENCE = "bankrupt-elon-agentos";
+export const AGENT_TTL_SECONDS = 15 * 60;
+export const AGENT_SCOPES = ["game:read", "game:trade"] as const;
+export type AgentScope = (typeof AGENT_SCOPES)[number];
 
 function jwtSecret(): Uint8Array {
   const value = process.env.JWT_SECRET;
@@ -39,8 +43,7 @@ export async function createNonce(address: string): Promise<{ nonce: string; mes
   return { nonce, message };
 }
 
-/** Verify the signature over the stored nonce message; on success issue a JWT. */
-export async function verifyAndIssueToken(
+async function verifyAndConsumeNonce(
   address: string,
   signature: string,
 ): Promise<string | null> {
@@ -69,6 +72,16 @@ export async function verifyAndIssueToken(
   });
   if (consumed.count !== 1) return null;
 
+  return wallet;
+}
+
+/** Verify the signature over the stored nonce message; on success issue a JWT. */
+export async function verifyAndIssueToken(
+  address: string,
+  signature: string,
+): Promise<string | null> {
+  const wallet = await verifyAndConsumeNonce(address, signature);
+  if (!wallet) return null;
   return new SignJWT({})
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(wallet)
@@ -77,13 +90,47 @@ export async function verifyAndIssueToken(
     .sign(jwtSecret());
 }
 
+export async function verifyAndIssueAgentToken(
+  address: string,
+  signature: string,
+): Promise<string | null> {
+  const wallet = await verifyAndConsumeNonce(address, signature);
+  if (!wallet) return null;
+  return new SignJWT({ scope: AGENT_SCOPES.join(" ") })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(wallet)
+    .setAudience(AGENT_AUDIENCE)
+    .setIssuedAt()
+    .setExpirationTime(`${AGENT_TTL_SECONDS}s`)
+    .sign(jwtSecret());
+}
+
 /** Verify a session JWT and return the wallet address (checksum) or null. */
 export async function verifyToken(token: string): Promise<string | null> {
   try {
     const { payload } = await jwtVerify(token, jwtSecret());
+    const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (audiences.includes(AGENT_AUDIENCE)) return null;
     return typeof payload.sub === "string" && isAddress(payload.sub)
       ? getAddress(payload.sub)
       : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface VerifiedAgentToken {
+  walletAddress: string;
+  scopes: AgentScope[];
+}
+
+export async function verifyAgentToken(token: string): Promise<VerifiedAgentToken | null> {
+  try {
+    const { payload } = await jwtVerify(token, jwtSecret(), { audience: AGENT_AUDIENCE });
+    if (typeof payload.sub !== "string" || !isAddress(payload.sub)) return null;
+    const suppliedScopes = typeof payload.scope === "string" ? payload.scope.split(/\s+/) : [];
+    const scopes = AGENT_SCOPES.filter((scope) => suppliedScopes.includes(scope));
+    return { walletAddress: getAddress(payload.sub), scopes: [...scopes] };
   } catch {
     return null;
   }
@@ -95,4 +142,22 @@ export async function authenticateRequest(request: Request): Promise<string> {
   const wallet = await verifyToken(token);
   if (!wallet) throw new ApiError(401, "UNAUTHORIZED", "Invalid or expired session");
   return wallet;
+}
+
+export async function authenticateGameRequest(
+  request: Request,
+  requiredScope: AgentScope,
+): Promise<string> {
+  const authorization = request.headers.get("authorization");
+  if (authorization !== null) {
+    const match = /^Bearer ([^\s,]+)$/.exec(authorization);
+    if (!match) throw new ApiError(401, "UNAUTHORIZED", "Invalid bearer authorization");
+    const verified = await verifyAgentToken(match[1]);
+    if (!verified) throw new ApiError(401, "UNAUTHORIZED", "Invalid or expired agent session");
+    if (!verified.scopes.includes(requiredScope)) {
+      throw new ApiError(403, "INSUFFICIENT_SCOPE", "Agent session lacks the required scope");
+    }
+    return verified.walletAddress;
+  }
+  return authenticateRequest(request);
 }

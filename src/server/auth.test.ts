@@ -1,4 +1,4 @@
-import { SignJWT } from "jose";
+import { SignJWT, jwtVerify } from "jose";
 import { privateKeyToAccount } from "viem/accounts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,7 +16,14 @@ vi.mock("./db", () => ({
   },
 }));
 
-import { authenticateRequest, verifyAndIssueToken, verifyToken } from "./auth";
+import {
+  authenticateGameRequest,
+  authenticateRequest,
+  verifyAgentToken,
+  verifyAndIssueAgentToken,
+  verifyAndIssueToken,
+  verifyToken,
+} from "./auth";
 
 const privateKey = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const account = privateKeyToAccount(privateKey);
@@ -80,5 +87,94 @@ describe("signed authentication", () => {
     const valid = await new SignJWT({}).setProtectedHeader({ alg: "HS256" }).setSubject(account.address.toLowerCase()).setExpirationTime("1h").sign(currentSecret);
     const request = new Request("http://localhost/private", { headers: { cookie: `other=x; musk_session=${valid}` } });
     expect(await authenticateRequest(request)).toBe(account.address);
+  });
+
+  it("issues a distinct 15-minute AgentOS token with read and trade scopes", async () => {
+    const nonce = "agent-nonce";
+    const message = `Bankrupt Elon Musk — sign in\nAddress: ${account.address}\nNonce: ${nonce}`;
+    nonceFindUnique.mockResolvedValue({
+      walletAddress: account.address,
+      nonce,
+      message,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    nonceDeleteMany.mockResolvedValue({ count: 1 });
+
+    const token = await verifyAndIssueAgentToken(
+      account.address.toLowerCase(),
+      await account.signMessage({ message }),
+    );
+
+    expect(token).not.toBeNull();
+    const secret = new TextEncoder().encode("test-secret-at-least-32-bytes-long");
+    const { payload } = await jwtVerify(token!, secret, { audience: "bankrupt-elon-agentos" });
+    expect(payload.sub).toBe(account.address);
+    expect(payload.scope).toBe("game:read game:trade");
+    expect(payload.exp! - payload.iat!).toBeLessThanOrEqual(900);
+    expect(payload.exp! - payload.iat!).toBeGreaterThanOrEqual(899);
+    expect(await verifyAgentToken(token!)).toEqual({
+      walletAddress: account.address,
+      scopes: ["game:read", "game:trade"],
+    });
+    expect(await verifyToken(token!)).toBeNull();
+  });
+
+  it("rejects a normal cookie token as an AgentOS token", async () => {
+    const secret = new TextEncoder().encode("test-secret-at-least-32-bytes-long");
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject(account.address)
+      .setExpirationTime("1h")
+      .sign(secret);
+    expect(await verifyAgentToken(token)).toBeNull();
+  });
+
+  it("uses an explicit Agent bearer before a stale cookie", async () => {
+    const secret = new TextEncoder().encode("test-secret-at-least-32-bytes-long");
+    const staleCookie = await new SignJWT({})
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject("0x0000000000000000000000000000000000000001")
+      .setExpirationTime("1h")
+      .sign(secret);
+    const agentToken = await new SignJWT({ scope: "game:read game:trade" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject(account.address)
+      .setAudience("bankrupt-elon-agentos")
+      .setExpirationTime("15m")
+      .sign(secret);
+    const request = new Request("http://localhost/api/game", {
+      headers: {
+        authorization: `Bearer ${agentToken}`,
+        cookie: `musk_session=${staleCookie}`,
+      },
+    });
+
+    expect(await authenticateGameRequest(request, "game:read")).toBe(account.address);
+  });
+
+  it("does not fall back to a cookie for malformed bearer auth", async () => {
+    const request = new Request("http://localhost/api/game", {
+      headers: {
+        authorization: "Basic bad",
+        cookie: "musk_session=otherwise-valid",
+      },
+    });
+    await expect(authenticateGameRequest(request, "game:read"))
+      .rejects.toMatchObject({ status: 401, code: "UNAUTHORIZED" });
+  });
+
+  it("rejects an Agent token that lacks the required scope", async () => {
+    const secret = new TextEncoder().encode("test-secret-at-least-32-bytes-long");
+    const readOnly = await new SignJWT({ scope: "game:read" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject(account.address)
+      .setAudience("bankrupt-elon-agentos")
+      .setExpirationTime("15m")
+      .sign(secret);
+    const request = new Request("http://localhost/api/trades", {
+      headers: { authorization: `Bearer ${readOnly}` },
+    });
+    await expect(authenticateGameRequest(request, "game:trade"))
+      .rejects.toMatchObject({ status: 403, code: "INSUFFICIENT_SCOPE" });
   });
 });

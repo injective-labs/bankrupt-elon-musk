@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@injpass/cli':
-        specifier: ^2.5.0
-        version: 2.5.0
+        specifier: ^2.7.0
+        version: 2.7.0
       '@prisma/client':
         specifier: ^6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
@@ -493,8 +493,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@injpass/cli@2.5.0':
-    resolution: {integrity: sha512-fMhdRnJC+QwDNGwRtuS1sgVs0JaxlunbRXrQ4rbsCNZ9o6u4wjNaz6iQ85+DHV1PTCw90ewbRcLAasRFtLMRrQ==}
+  '@injpass/cli@2.7.0':
+    resolution: {integrity: sha512-AIhmCm7u4owTkzexdEa7N0S331nmJvZYwnWyXnUkUFk21ClevWTfq/ZfQvv5fG7sPE914N7IeCJEJrFGGPlYgg==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1900,7 +1900,7 @@ snapshots:
   '@img/sharp-win32-x64@0.34.5':
     optional: true
 
-  '@injpass/cli@2.5.0': {}
+  '@injpass/cli@2.7.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:

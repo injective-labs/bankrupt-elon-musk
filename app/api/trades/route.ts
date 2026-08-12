@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/server/auth";
+import { authenticateGameRequest } from "@/server/auth";
 import { ApiError, toErrorResponse } from "@/server/http/errors";
 import { executeTrade, getTradeHistory, type TradeCommand } from "@/server/trades";
 
@@ -17,7 +17,7 @@ function command(value: unknown): TradeCommand {
 
 export async function POST(request: Request) {
   try {
-    const wallet = await authenticateRequest(request);
+    const wallet = await authenticateGameRequest(request, "game:trade");
     let body: unknown;
     try { body = await request.json(); } catch { throw new ApiError(422, "INVALID_JSON", "Request body must be valid JSON"); }
     return NextResponse.json(await executeTrade(wallet, command(body)));
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const wallet = await authenticateRequest(request);
+    const wallet = await authenticateGameRequest(request, "game:read");
     const params = new URL(request.url).searchParams;
     const raw = params.get("limit");
     const parsed = raw === null ? 50 : Number(raw);

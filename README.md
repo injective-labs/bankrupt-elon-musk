@@ -122,6 +122,51 @@ NEXT_PUBLIC_INJPASS_EMBED_URL=http://localhost:3000/embed
 因此连接前需先启动 inj-pass-frontend(默认 3000 端口);本游戏跑在 3002 以避免冲突。
 `next.config.ts` 已据该地址放行 CSP `frame-src`。
 
+## AgentOS Chat Mini-App
+
+Elon 也可作为 INJ Pass AgentOS mini-app 被 Chat 直接调用。INJ Pass 通过隐藏 iframe
+发送 `injpass-miniapp-v1` 命令；Elon 仍使用自己的服务端权威报价、余额、持仓与成交逻辑，
+不会执行真实资产或链上交易。
+
+本地联调端口：
+
+```text
+inj-pass-frontend  http://localhost:3000
+inj-pass-backend   http://localhost:3001
+Elon game          http://localhost:3002
+Elon PostgreSQL    localhost:5433
+```
+
+INJ Pass 前端需配置：
+
+```bash
+NEXT_PUBLIC_BANKRUPT_ELON_APP_URL=http://localhost:3002
+```
+
+Elon 需配置精确的可信宿主：
+
+```bash
+NEXT_PUBLIC_INJPASS_EMBED_URL=http://localhost:3000/embed
+```
+
+生产环境只接受该变量对应的精确 origin；开发环境额外允许 `http` loopback 地址。
+首次执行账户查询或模拟买卖时，Elon 会请求当前 INJ Pass 钱包签名，并签发仅存于
+iframe 内存、有效期 15 分钟的 `game:read game:trade` bearer。钱包切换或鉴权失败会清除它。
+
+Chat 示例：
+
+```text
+@Bankrupt Elon Musk 查询 TSLA 行情
+@Bankrupt Elon Musk 查看余额
+@Bankrupt Elon Musk 查看持仓
+@Bankrupt Elon Musk 买入 1 股 TSLA
+@Bankrupt Elon Musk show my last 5 trades
+@Bankrupt Elon Musk sell all TSLA
+```
+
+完整且无歧义的买卖命令会立即执行模拟交易；资产或数量缺失、资产名歧义时不会成交。
+成交价、金额、成交 ID 和成交后状态只采用 Elon 服务端回执。
+
 ## 结构
 
 - `src/data/` — 常量、产品目录、市场分组、扩展资产生成、分类标签(逐字移植)
@@ -130,5 +175,6 @@ NEXT_PUBLIC_INJPASS_EMBED_URL=http://localhost:3000/embed
 - `src/state/` — `GameProvider`(Context+commit 模型)、`persistence`(localStorage,沿用旧存档 key)
 - `src/sound/` — Web Audio 音效
 - `src/wallet/` — `InjPassProvider` + `ConnectButton`
+- `src/agentos/` — AgentOS 协议、可信宿主、内存鉴权、资产解析与命令桥接
 - `src/components/` — TopBar / FxTicker / PortfolioPanel / MarketPanel / ProductCard / FinancePanel
 - `app/api/chart/route.ts` — Yahoo 行情代理

@@ -1,27 +1,51 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ getLossLeaderboard: vi.fn(), verifyToken: vi.fn() }));
-vi.mock("@/server/leaderboard", () => ({ getLossLeaderboard: mocks.getLossLeaderboard }));
-vi.mock("@/server/auth", () => ({ verifyToken: mocks.verifyToken }));
+const mocks = vi.hoisted(() => ({
+  authenticateGameRequest: vi.fn(),
+  verifyToken: vi.fn(),
+  leaderboard: vi.fn(),
+  readCookie: vi.fn(),
+}));
+
+vi.mock("@/server/auth", () => ({
+  authenticateGameRequest: mocks.authenticateGameRequest,
+  verifyToken: mocks.verifyToken,
+}));
+vi.mock("@/server/leaderboard", () => ({ getLossLeaderboard: mocks.leaderboard }));
+vi.mock("@/server/http/sessionCookie", () => ({ readSessionCookie: mocks.readCookie }));
 
 import { GET } from "./route";
 
 describe("GET /api/leaderboard", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("serves a masked public leaderboard without accepting a wallet query parameter", async () => {
-    mocks.getLossLeaderboard.mockResolvedValueOnce({ top: [], total: 0, you: null });
-    const response = await GET(new Request("http://localhost/api/leaderboard?wallet=0xattacker"));
-
-    expect(response.status).toBe(200);
-    expect(mocks.getLossLeaderboard).toHaveBeenCalledWith(null, 10);
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.leaderboard.mockResolvedValue({ top: [] });
+    mocks.readCookie.mockReturnValue(null);
   });
 
-  it("includes caller rank only when the session cookie verifies", async () => {
-    mocks.verifyToken.mockResolvedValueOnce("0xcaller");
-    mocks.getLossLeaderboard.mockResolvedValueOnce({ top: [], total: 20, you: { rank: 12, total: 20, pnl: "-1" } });
-    await GET(new Request("http://localhost/api/leaderboard", { headers: { cookie: "musk_session=token" } }));
-    expect(mocks.verifyToken).toHaveBeenCalledWith("token");
-    expect(mocks.getLossLeaderboard).toHaveBeenCalledWith("0xcaller", 10);
+  it("keeps the leaderboard public without caller identity", async () => {
+    const response = await GET(new Request("http://localhost/api/leaderboard"));
+    expect(response.status).toBe(200);
+    expect(mocks.leaderboard).toHaveBeenCalledWith(null, 10);
+    expect(mocks.authenticateGameRequest).not.toHaveBeenCalled();
+  });
+
+  it("authenticates an explicit Agent bearer for current-user rank", async () => {
+    mocks.authenticateGameRequest.mockResolvedValue("0xagent");
+    await GET(new Request("http://localhost/api/leaderboard", {
+      headers: { authorization: "Bearer agent.jwt" },
+    }));
+    expect(mocks.authenticateGameRequest).toHaveBeenCalledWith(expect.any(Request), "game:read");
+    expect(mocks.leaderboard).toHaveBeenCalledWith("0xagent", 10);
+  });
+
+  it("preserves optional standalone cookie identity", async () => {
+    mocks.readCookie.mockReturnValue("cookie.jwt");
+    mocks.verifyToken.mockResolvedValue("0xcookie");
+    await GET(new Request("http://localhost/api/leaderboard", {
+      headers: { cookie: "musk_session=cookie.jwt" },
+    }));
+    expect(mocks.verifyToken).toHaveBeenCalledWith("cookie.jwt");
+    expect(mocks.leaderboard).toHaveBeenCalledWith("0xcookie", 10);
   });
 });

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), execute: vi.fn(), history: vi.fn() }));
-vi.mock("@/server/auth", () => ({ authenticateRequest: mocks.auth }));
+vi.mock("@/server/auth", () => ({ authenticateGameRequest: mocks.auth }));
 vi.mock("@/server/trades", () => ({ executeTrade: mocks.execute, getTradeHistory: mocks.history }));
 import { GET, POST } from "./route";
 
@@ -15,10 +15,12 @@ describe("/api/trades", () => {
     mocks.execute.mockResolvedValue({ cash: "1" });
     const response = await POST(new Request("http://localhost/api/trades", { method: "POST", body: JSON.stringify(body) }));
     expect(response.status).toBe(200); expect(mocks.execute).toHaveBeenCalledWith("0xwallet", body);
+    expect(mocks.auth).toHaveBeenCalledWith(expect.any(Request), "game:trade");
   });
   it("caps authenticated history pagination at 100", async () => {
     mocks.history.mockResolvedValue({ rows: [], nextCursor: null });
     await GET(new Request("http://localhost/api/trades?cursor=5&limit=900"));
     expect(mocks.history).toHaveBeenCalledWith("0xwallet", { cursor: "5", limit: 100 });
+    expect(mocks.auth).toHaveBeenCalledWith(expect.any(Request), "game:read");
   });
 });
