@@ -14,13 +14,20 @@ vi.mock("@/wallet/useInjPassLogin", () => ({
 }));
 
 const product = [...productById.values()][0];
-const asset = { id: product.id, name: product.name, nameEn: product.nameEn, category: product.assetClass || "美股", subCategory: product.subCategory, ticker: product.ticker || product.id, currency: "USD", unit: product.unit, unitEn: product.unitEn, enabled: true, displayOrder: 1, usdPrice: "12.3456789", marketDate: "2026-07-18T00:00:00.000Z", quoteStatus: "ACTIVE" as const };
+const asset = { id: product.id, name: product.name, nameEn: product.nameEn, category: product.assetClass || "美股", subCategory: product.subCategory, ticker: product.ticker || product.id, currency: "USD", unit: product.unit, unitEn: product.unitEn, enabled: true, displayOrder: 1, usdPrice: "12.3456789", marketDate: new Date().toISOString(), quoteStatus: "ACTIVE" as const };
 const account = (overrides: Partial<AccountProjection> = {}): AccountProjection => ({ walletAddress: "0x1", cash: "100", holdingsValue: "0", netWorth: "100", pnl: "0", positions: [], assets: [asset], recentTransactions: [], marketAsOf: asset.marketDate, settlementLocked: false, resetEnabled: false, updatedAt: "2026-07-19T00:00:00.000Z", ...overrides });
 const api = (overrides: Partial<GameApi> = {}): GameApi => ({ getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }), getMarket: vi.fn().mockResolvedValue({ assets: account().assets, marketAsOf: account().marketAsOf }), loginWithSignature: vi.fn(), logout: vi.fn(), getGame: vi.fn().mockResolvedValue(account()), submitTrade: vi.fn().mockResolvedValue(account()), resetGame: vi.fn(), getTransactions: vi.fn(), getLeaderboard: vi.fn().mockResolvedValue({ top: [], total: 0, you: null }), ...overrides });
 const props = { product, price: Number(asset.usdPrice), owned: 0, overdraft: false, currency: "USD", live: true, selected: false, locale: "en" as const, activeSide: null, onOpenTicket: vi.fn(), onCloseTicket: vi.fn() };
 
 describe("ProductCard authoritative trading states", () => {
   afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
+
+  it("uses a stepper-free integer field so the quantity stays visible in narrow cards", () => {
+    render(<GameProvider api={api()}><ProductCard {...props} activeSide="buy" /></GameProvider>);
+
+    expect(screen.getByRole("textbox", { name: /买入数量|Buy quantity/ })).toHaveValue("1");
+    expect(screen.queryByRole("spinbutton", { name: /买入数量|Buy quantity/ })).not.toBeInTheDocument();
+  });
 
   it("routes every signed-out trade intent to login without opening a ticket or trading", async () => {
     const client = api({ getSession: vi.fn().mockResolvedValue(null) });
@@ -37,7 +44,7 @@ describe("ProductCard authoritative trading states", () => {
   });
 
   it("shows quote date and stale status and prevents trading", async () => {
-    const stale = { ...asset, quoteStatus: "STALE" as const };
+    const stale = { ...asset, marketDate: "2026-07-18T00:00:00.000Z", quoteStatus: "STALE" as const };
     render(<GameProvider api={api({ getGame: vi.fn().mockResolvedValue(account({ assets: [stale] })) })}><ProductCard {...props} /></GameProvider>);
     await screen.findByText(/价格过期|Stale price/);
     expect(screen.getByText(/2026-07-18/)).toBeInTheDocument();
@@ -58,7 +65,7 @@ describe("ProductCard authoritative trading states", () => {
     await act(async () => reject(Object.assign(new Error("no funds"), { code: "INSUFFICIENT_CASH" })));
     expect(screen.getByRole("alert")).toHaveTextContent(/余额不足|Insufficient cash/);
     expect(view.getByRole("button", { name: /确认买入|Confirm buy/ })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: /买入数量|Buy quantity/ })).toHaveValue(1);
+    expect(screen.getByRole("textbox", { name: /买入数量|Buy quantity/ })).toHaveValue("1");
     expect(screen.getByRole("article")).toHaveClass("trade-error");
   });
 
@@ -104,7 +111,7 @@ describe("ProductCard authoritative trading states", () => {
     const hugeAsset = { ...asset, usdPrice: "1" };
     const client = api({ getGame: vi.fn().mockResolvedValue(account({ cash: "9007199254740994", assets: [hugeAsset] })) });
     render(<GameProvider api={client}><ProductCard {...props} activeSide="buy" /></GameProvider>);
-    const input = await screen.findByRole("spinbutton", { name: /买入数量|Buy quantity/ });
+    const input = await screen.findByRole("textbox", { name: /买入数量|Buy quantity/ });
     fireEvent.change(input, { target: { value: "9007199254740993" } });
     fireEvent.click(screen.getByRole("button", { name: /确认买入|Confirm buy/ }));
     await waitFor(() => expect(client.submitTrade).toHaveBeenCalledWith(expect.objectContaining({ quantity: "9007199254740993" })));
@@ -133,7 +140,7 @@ describe("ProductCard authoritative trading states", () => {
   it("disables trading when the live clock crosses into settlement after load", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-20T08:59:59.000Z"));
-    const client = api();
+    const client = api({ getGame: vi.fn().mockResolvedValue(account({ assets: [{ ...asset, marketDate: "2026-07-20T00:00:00.000Z" }] })) });
     render(<GameProvider api={client}><ProductCard {...props} /></GameProvider>);
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const buy = screen.getByRole("button", { name: "Buy" });

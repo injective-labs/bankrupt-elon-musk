@@ -15,7 +15,7 @@ INJ Pass 夏季特别活动小游戏的 React + TypeScript + Tailwind (Next.js) 
 ## 数据库(规范化)
 
 数据库定义见 [prisma/schema.prisma](prisma/schema.prisma)。`Player` 保存服务端资金，`Position`
-保存当前持仓，`Transaction` 是不可变的买入、卖出和重置账本。`Asset` 保存 160 个可交易资产，
+保存当前持仓，`Transaction` 是不可变的买入、卖出和重置账本。`Asset` 保存 161 个可交易资产，
 `AssetQuote` 保存每个资产的权威最新报价，`AssetDailyPrice` 只从上线后的刷新任务开始逐日积累；
 部署不会回填历史行情。排行榜完全根据数据库中的现金、持仓和权威报价计算，不接受客户端 P&L。
 
@@ -29,7 +29,7 @@ docker run -d --name bankrupt-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ba
 
 pnpm prisma generate           # 生成 Prisma Client
 pnpm prisma migrate deploy     # 在全新库上套用 prisma/migrations 建表
-pnpm prisma db seed            # 幂等写入 160 个资产
+pnpm prisma db seed            # 幂等写入 161 个资产
 
 pnpm dev                       # http://localhost:3002
 ```
@@ -48,6 +48,21 @@ pnpm prisma db seed
 pnpm test
 pnpm build
 ```
+
+资产目录发生变化时（例如新增 TSLA），seed 后必须在开放交易前主动刷新一次行情，不能只等待
+每天的 Vercel cron。`MUSK_DEPLOYMENT_URL` 指向即将发布或当前兼容的 Musk 部署：
+
+```bash
+MUSK_DEPLOYMENT_URL=https://bankrupt-elon-musk-next.vercel.app
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  "$MUSK_DEPLOYMENT_URL/api/cron/refresh-market"
+psql "$DATABASE_URL" -c \
+  "SELECT a.id, a.ticker, a.\"quoteSymbol\", q.status, q.\"marketDate\" FROM \"Asset\" a LEFT JOIN \"AssetQuote\" q ON q.\"assetId\" = a.id WHERE a.id = 'tesla-basket';"
+```
+
+验收结果必须存在 `tesla-basket / TSLA / TSLA`，且报价状态为 `ACTIVE`，然后才部署或开放
+依赖该资产的 Chat 命令。
 
 另外单独运行数据库集成验证。此命令自行创建干净的本地一次性 PostgreSQL 容器，应用迁移，
 连续执行两次种子以验证幂等性，串行运行数据库测试，并在结束时删除容器；它不会读取或连接生产
@@ -176,11 +191,15 @@ Chat 示例：
 @Bankrupt Elon Musk 查看余额
 @Bankrupt Elon Musk 查看持仓
 @Bankrupt Elon Musk 买入 1 股 TSLA
+@Bankrupt Elon Musk buy all doges coin with my virtual assets
 @Bankrupt Elon Musk show my last 5 trades
 @Bankrupt Elon Musk sell all TSLA
 ```
 
 完整且无歧义的买卖命令会立即执行模拟交易；资产或数量缺失、资产名歧义时不会成交。
+Chat 解析层会移除 `with my virtual assets` 等资金来源修饰，Elon 执行层再把常见别名
+（例如 `dogecoin`、`doge coin`、`doges coin`）解析到权威资产目录；最终仍只允许目录中存在且
+有可用服务端报价的资产成交。
 成交价、金额、成交 ID 和成交后状态只采用 Elon 服务端回执。
 
 ## 结构

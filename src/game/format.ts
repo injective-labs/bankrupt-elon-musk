@@ -41,6 +41,18 @@ export function floorDecimalDivision(dividend: string, divisor: string): string 
   return ((left.coefficient * right.scale) / (right.coefficient * left.scale)).toString();
 }
 
+export function multiplyDecimalByInteger(decimal: string, integer: string): string {
+  const value = decimalParts(decimal);
+  if (!value || !/^(?:0|[1-9]\d*)$/.test(integer)) return "0";
+  const product = value.coefficient * BigInt(integer);
+  if (value.scale === 1n) return product.toString();
+  const scaleDigits = value.scale.toString().length - 1;
+  const digits = product.toString().padStart(scaleDigits + 1, "0");
+  const whole = digits.slice(0, -scaleDigits);
+  const fraction = digits.slice(-scaleDigits).replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
 export function integerFraction(value: string, numerator: bigint, denominator: bigint): string {
   if (!/^(?:0|[1-9]\d*)$/.test(value) || denominator <= 0n) return "0";
   return (BigInt(value) * numerator / denominator).toString();

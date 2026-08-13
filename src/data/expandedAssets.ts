@@ -305,7 +305,7 @@ const CORE_CRYPTO_TICKERS = new Set([
   "BTC", "ETH", "DOGE", "LTC", "SOL", "XRP", "BNB", "ADA", "LINK", "AVAX", "DOT", "INJ",
 ]);
 const CORE_US_STOCK_TICKERS = new Set([
-  "NVDA", "AMD", "AVGO", "TSM", "ASML", "MU", "SNDK", "ARM", "MRVL", "SMCI", "VRT", "DELL",
+  "NVDA", "TSLA", "AMD", "AVGO", "TSM", "ASML", "MU", "SNDK", "ARM", "MRVL", "SMCI", "VRT", "DELL",
   "ANET", "ALAB", "CRWV", "ORCL", "MSFT", "GOOGL", "AMZN", "META", "PLTR", "MSTR", "COIN",
   "NET", "INTC", "QCOM", "TXN", "AMAT", "LRCX", "KLAC", "ADI", "MCHP", "ON", "MPWR", "NXPI",
   "TER", "LSCC", "COHR",

@@ -1,7 +1,7 @@
 import type { Locale, Product } from "@/types";
 import { isInvestmentProduct } from "@/data/categories";
 import { t } from "@/i18n";
-import { formatCurrency, formatNumber } from "./format";
+import { formatDecimalCurrency, formatDecimalNumber, multiplyDecimalByInteger } from "./format";
 
 export type TradeSide = "buy" | "sell";
 
@@ -24,10 +24,10 @@ export function getMarkFontSize(mark: string): number {
   return 22;
 }
 
-export function getTradeEstimateText(locale: Locale, price: number, side: TradeSide, quantity: string, maximum: string): string {
+export function getTradeEstimateText(locale: Locale, price: string, side: TradeSide, quantity: string, maximum: string): string {
   if (!/^[1-9]\d*$/.test(quantity) || BigInt(quantity) > BigInt(maximum || "0")) return side === "buy" ? t(locale, "insufficientCash") : t(locale, "noPosition");
-  const total = price * Number(quantity);
-  if (side === "buy") return `${t(locale, "estimatedCost")} ${formatCurrency(total, total >= 1_000_000_000)}`;
+  const total = multiplyDecimalByInteger(price, quantity);
+  if (side === "buy") return `${t(locale, "estimatedCost")} ${formatDecimalCurrency(total)}`;
   const remaining = BigInt(maximum || "0") - BigInt(quantity);
-  return `${t(locale, "estimatedProceeds")} ${formatCurrency(total, total >= 1_000_000_000)} · ${t(locale, "remainingAfterSell")} ${formatNumber(Number(remaining), locale)}`;
+  return `${t(locale, "estimatedProceeds")} ${formatDecimalCurrency(total)} · ${t(locale, "remainingAfterSell")} ${formatDecimalNumber(remaining.toString(), locale, 0)}`;
 }

@@ -8,11 +8,12 @@ describe("buildAssetSeed", () => {
   it("builds the complete enabled asset catalogue in display order", () => {
     const rows = buildAssetSeed();
 
-    expect(rows).toHaveLength(160);
-    expect(new Set(rows.map((row) => row.id)).size).toBe(160);
+    expect(rows).toHaveLength(161);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(161);
+    expect(rows).toContainEqual(expect.objectContaining({ id: "tesla-basket", ticker: "TSLA", quoteSymbol: "TSLA" }));
     expect(rows.every((row) => row.quoteSymbol && row.enabled)).toBe(true);
     expect(rows.map((row) => row.displayOrder)).toEqual(
-      Array.from({ length: 160 }, (_, index) => index),
+      Array.from({ length: 161 }, (_, index) => index),
     );
   });
 
@@ -24,7 +25,7 @@ describe("buildAssetSeed", () => {
 
     expect(counts).toEqual({
       加密货币: 12,
-      美股: 38,
+      美股: 39,
       港股: 20,
       韩股: 23,
       台股: 23,

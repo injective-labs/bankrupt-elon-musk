@@ -89,10 +89,8 @@ function TradeTicket({
           <span>{sideLabel}</span>
           <input
             className="trade-quantity-input"
-            type="number"
-            min={1}
-            max={maxQuantity}
-            step={1}
+            type="text"
+            pattern="[1-9][0-9]*"
             inputMode="numeric"
             value={qty}
             disabled={disabled}
@@ -121,7 +119,7 @@ function TradeTicket({
           );
         })}
       </div>
-      <p className="trade-estimate">{t(locale, "estimateOnly")}: {getTradeEstimateText(locale, Number(asset?.usdPrice ?? 0), side, qty, maxQuantity)}</p>
+      <p className="trade-estimate">{t(locale, "estimateOnly")}: {getTradeEstimateText(locale, asset?.usdPrice ?? "0", side, qty, maxQuantity)}</p>
       {lastError && <p className="trade-error" role="alert">{errorText(locale, lastError)}</p>}
       <div className="trade-ticket-actions">
         <button
