@@ -147,9 +147,21 @@ Elon 需配置精确的可信宿主：
 
 ```bash
 NEXT_PUBLIC_INJPASS_EMBED_URL=http://localhost:3000/embed
+NEXT_PUBLIC_INJPASS_ALLOWED_HOST_ORIGINS=
 ```
 
-生产环境只接受该变量对应的精确 origin；开发环境额外允许 `http` loopback 地址。
+生产环境接受 `NEXT_PUBLIC_INJPASS_EMBED_URL` 对应的精确 origin；如同一部署还需嵌入
+官方测试前端，可通过逗号分隔的 `NEXT_PUBLIC_INJPASS_ALLOWED_HOST_ORIGINS` 增加其他
+精确 HTTP(S) origin。未列出的父页面以及无效配置都会被拒绝；开发环境额外允许
+`http` loopback 地址。
+
+例如，保留正式钱包连接并同时允许 INJ Pass test：
+
+```bash
+NEXT_PUBLIC_INJPASS_EMBED_URL=https://www.injpass.com/embed
+NEXT_PUBLIC_INJPASS_ALLOWED_HOST_ORIGINS=https://inj-pass-frontend-test.vercel.app
+```
+
 首次执行账户查询或模拟买卖时，Elon 会请求当前 INJ Pass 钱包签名，并签发仅存于
 iframe 内存、有效期 15 分钟的 `game:read game:trade` bearer。钱包切换或鉴权失败会清除它。
 

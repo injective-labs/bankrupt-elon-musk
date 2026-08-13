@@ -44,6 +44,36 @@ describe("trustedInjPassHostOrigin", () => {
     )).toThrow("Untrusted INJ Pass host origin");
   });
 
+  it("accepts the explicitly allowlisted INJ Pass test origin", () => {
+    const testOrigin = "https://inj-pass-frontend-test.vercel.app";
+    const location = `https://elon.example/?injpass_miniapp=1&injpass_host_origin=${encodeURIComponent(testOrigin)}`;
+
+    expect(() => trustedInjPassHostOrigin(
+      location,
+      "production",
+      "https://www.injpass.com/embed",
+    )).toThrow("Untrusted INJ Pass host origin");
+
+    expect(trustedInjPassHostOrigin(
+      location,
+      "production",
+      "https://www.injpass.com/embed",
+      ` https://preview.example/path, ${testOrigin}/embed `,
+    )).toBe(testOrigin);
+  });
+
+  it.each([
+    "not-a-url",
+    "javascript:alert(1)",
+  ])("rejects an invalid configured host origin %s", (configuredOrigin) => {
+    expect(() => trustedInjPassHostOrigin(
+      "https://elon.example/?injpass_miniapp=1&injpass_host_origin=https%3A%2F%2Finj-pass-frontend-test.vercel.app",
+      "production",
+      "https://www.injpass.com/embed",
+      configuredOrigin,
+    )).toThrow("Invalid INJ Pass host origin configuration");
+  });
+
   it.each([
     "http://localhost:3000",
     "http://127.0.0.1:3000",
