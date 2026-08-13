@@ -26,6 +26,44 @@ describe("parseElonAgentCommand", () => {
     },
   );
 
+  it("accepts a strongly typed multi-asset preparation without authority fields", () => {
+    expect(parseElonAgentCommand({
+      appId: "bankrupt-elon-musk",
+      action: "prepare_trade",
+      params: {
+        legs: [
+          { side: "BUY", asset: "DOGE", cashBps: 5000 },
+          { side: "BUY", asset: "BTC", cashBps: 5000 },
+        ],
+      },
+    })).toMatchObject({
+      action: "prepare_trade",
+      params: { legs: [
+        { side: "BUY", asset: "DOGE", cashBps: 5000 },
+        { side: "BUY", asset: "BTC", cashBps: 5000 },
+      ] },
+    });
+  });
+
+  it("accepts only a stored plan id and server confirmation message for execution", () => {
+    expect(parseElonAgentCommand({
+      appId: "bankrupt-elon-musk",
+      action: "execute_trade_plan",
+      params: { planId: "plan-1", confirmationMessage: "confirm plan-1" },
+    })).toMatchObject({
+      action: "execute_trade_plan",
+      params: { planId: "plan-1", confirmationMessage: "confirm plan-1" },
+    });
+  });
+
+  it("accepts cancellation of one stored plan", () => {
+    expect(parseElonAgentCommand({
+      appId: "bankrupt-elon-musk",
+      action: "cancel_trade_plan",
+      params: { planId: "plan-1" },
+    })).toMatchObject({ action: "cancel_trade_plan", params: { planId: "plan-1" } });
+  });
+
   it("preserves safe optional fields", () => {
     expect(parseElonAgentCommand({
       appId: "bankrupt-elon-musk",
@@ -80,6 +118,9 @@ describe("parseElonAgentCommand", () => {
     { appId: "bankrupt-elon-musk", action: "buy", params: { walletAddress: "0xabc" } },
     { appId: "bankrupt-elon-musk", action: "buy", params: { amount: "10" } },
     { appId: "bankrupt-elon-musk", action: "buy", params: { idempotencyKey: "host-value" } },
+    { appId: "bankrupt-elon-musk", action: "prepare_trade", params: { legs: [{ side: "BUY", asset: "DOGE", cashBps: 5000, usdUnitPrice: "0.07" }] } },
+    { appId: "bankrupt-elon-musk", action: "prepare_trade", params: { legs: Array.from({ length: 21 }, () => ({ side: "BUY", asset: "DOGE", quantity: "1" })) } },
+    { appId: "bankrupt-elon-musk", action: "execute_trade_plan", params: { planId: "plan-1", confirmationMessage: "message", signature: "0x1234" } },
     { appId: "bankrupt-elon-musk", action: "buy", params: {}, extra: true },
   ])("rejects malformed or authority-injecting commands %#", (command) => {
     expect(parseElonAgentCommand(command)).toBeNull();

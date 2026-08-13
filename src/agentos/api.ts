@@ -9,9 +9,13 @@ import {
   getMarket,
   getTransactions,
   submitTrade,
+  prepareTradePlan,
+  executeTradePlan,
+  cancelTradePlan,
   verifyAgentSignature,
   type TradeInput,
 } from "@/client/gameApi";
+import type { TradePlanLeg } from "@/types";
 
 interface AgentProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -23,6 +27,9 @@ export interface ElonAgentApi {
   getTransactions(session: InjPassMiniAppSession, cursor?: string, limit?: number, signal?: AbortSignal): ReturnType<typeof getTransactions>;
   getLeaderboard(session: InjPassMiniAppSession, signal?: AbortSignal): ReturnType<typeof getLeaderboard>;
   submitTrade(session: InjPassMiniAppSession, command: TradeInput, signal?: AbortSignal): ReturnType<typeof submitTrade>;
+  prepareTradePlan(session: InjPassMiniAppSession, request: { legs: TradePlanLeg[] }, signal?: AbortSignal): ReturnType<typeof prepareTradePlan>;
+  executeTradePlan(session: InjPassMiniAppSession, planId: string, confirmationMessage: string, signal?: AbortSignal): ReturnType<typeof executeTradePlan>;
+  cancelTradePlan(session: InjPassMiniAppSession, planId: string, signal?: AbortSignal): ReturnType<typeof cancelTradePlan>;
   clearAgentSession(): void;
 }
 
@@ -108,6 +115,19 @@ export function createElonAgentApi(provider: AgentProvider): ElonAgentApi {
     ),
     getLeaderboard: (session, signal) => protectedRequest(session, (token) => getLeaderboard(token, signal), signal),
     submitTrade: (session, command, signal) => protectedRequest(session, (token) => submitTrade(command, token, signal), signal),
+    prepareTradePlan: (session, request, signal) => protectedRequest(session, (token) => prepareTradePlan(request.legs, token, signal), signal),
+    executeTradePlan: (session, planId, confirmationMessage, signal) => protectedRequest(session, async (token) => {
+      signal?.throwIfAborted();
+      const walletAddress = authenticatedWallet(session);
+      const signature = await provider.request({
+        method: "personal_sign",
+        params: [stringToHex(confirmationMessage), walletAddress],
+      });
+      if (typeof signature !== "string") throw new GameApiError(401, "INVALID_SIGNATURE", "Wallet returned an invalid plan signature");
+      signal?.throwIfAborted();
+      return executeTradePlan(planId, signature, token, signal);
+    }, signal),
+    cancelTradePlan: (session, planId, signal) => protectedRequest(session, (token) => cancelTradePlan(planId, token, signal), signal),
     clearAgentSession,
   };
 }

@@ -33,7 +33,8 @@
 | Omisper | XMTP 网络与本地 XMTP 客户端 | 宿主 session + 钱包签名 | 钱包签名初始化 XMTP 身份，消息由 XMTP 客户端发送 | 不依赖 iframe Cookie | 签名建立协议身份 |
 | Musk 可视游戏（嵌入） | Musk Postgres 与服务端交易逻辑 | 宿主 session 用于 UI；签名 nonce 证明所有权 | `/api/auth/agent-verify` 签发 15 分钟 `game:read game:trade` Bearer | 内存 Bearer | 服务端权威 dApp |
 | Musk 独立站 | Musk Postgres 与服务端交易逻辑 | 浮动 INJ Pass Connector | 签名 nonce 后签发 7 天 HttpOnly、`SameSite=Lax` Cookie | 第一方 Cookie | 顶层独立网站 |
-| Musk / Omisper Chat Agent | 各 dApp 自己的执行层 | 隐藏 iframe 收到的宿主 session | `agent-command` 只描述意图；执行层仍用签名、Bearer、链交易或协议身份授权 | 按 dApp；Musk 为内存 Bearer | `@应用` 命令执行 |
+| Musk Chat Agent | Musk Postgres 与服务端交易计划 | 后端模型选择白名单工具；隐藏 iframe 收到宿主 session | 读取直接返回；交易先 prepare，再由 INJ Pass 展示确认、签名并 execute | 内存 Bearer + 服务端 TradePlan | 自然语言、多资产、服务端权威交易 |
+| Omisper Chat Agent | Omisper 执行层 | 隐藏 iframe 收到的宿主 session | `agent-command` 只描述受控意图；执行层仍使用协议身份 | 按 Omisper 协议 | 规则明确的 iframe 命令 |
 
 ## 四类接入预案
 
@@ -74,9 +75,10 @@ from 地址或任意目标合约。
 
 ### D. Chat Agent dApp
 
-适用于在 Chat 中通过 `@应用` 解析并执行意图。宿主用带关联 ID 的 `agent-command` 发送
-结构化命令，dApp 返回一次 `agent-command-result`。该协议负责调用与结果关联，不负责
-绕过底层授权：
+适用于在 Chat 中通过 `@应用` 解析并执行意图。简单、封闭的命令可以由宿主确定性解析；
+需要理解自由表达、多资产组合、百分比或上下文的应用，应由模型选择该 dApp 白名单内的
+typed tool。两种方式最终都由宿主用带关联 ID 的 `agent-command` 发送结构化命令，dApp
+返回一次 `agent-command-result`。该协议负责调用与结果关联，不负责绕过底层授权：
 
 - 链上命令仍走交易/typed-data 签名；
 - 服务端权威命令仍走 nonce + scoped Bearer；
@@ -84,9 +86,18 @@ from 地址或任意目标合约。
 - 公开查询可以匿名执行。
 
 参考：Musk AgentOS、Omisper Agent bridge 和 INJ Gift 命令。对买卖、发消息、领红包等
-不可逆操作，命令解析必须无歧义，服务端或链上回执才是最终结果。自然语言解析层应先移除
-“使用我的模拟资金”之类不属于资产名的修饰，再由 dApp 执行层把受控别名映射到权威资产 ID；
-别名未命中或命中多个资产时必须停止并要求澄清，不能猜测成交标的。
+不可逆操作，命令解析必须无歧义，服务端或链上回执才是最终结果。模型只能把自然语言转换为
+schema 允许的意图参数，不能提交价格、余额、成交结果或任意 URL。dApp 执行层再把资产名或
+ticker 解析为权威资产 ID；未命中或命中多个资产时必须停止并要求澄清，不能猜测成交标的。
+
+Musk 使用 `musk_get_balance`、`musk_get_portfolio`、`musk_get_market`、
+`musk_get_history`、`musk_get_rank` 和 `musk_prepare_trade` 六个模型工具。买卖共用
+`musk_prepare_trade`，它支持整数数量、现金金额、现金/持仓 basis points 和整类清仓。
+游戏服务端根据当前数据库生成带哈希、过期时间和确认消息的 `TradePlan`。INJ Pass 展示每条
+腿的数量、价格、金额及前后余额；批准后才签署该计划的确认消息并进入 execute phase，拒绝则
+进入 cancel phase。execute/cancel 不是模型可选工具，因此模型不能伪造计划 ID 或跳过确认。
+执行时服务端再次校验现金、持仓和报价快照，并在 Serializable 事务中一次写入全部交易；同一
+计划重放返回原回执，不会重复成交。
 
 ## 选型决策
 

@@ -147,6 +147,12 @@ Elon 也可作为 INJ Pass AgentOS mini-app 被 Chat 直接调用。INJ Pass 通
 发送 `injpass-miniapp-v1` 命令；Elon 仍使用自己的服务端权威报价、余额、持仓与成交逻辑，
 不会执行真实资产或链上交易。
 
+Chat 中 `@Bankrupt Elon Musk` 后可直接使用自然语言查询或交易，例如“查看我的持仓”、
+“用一半现金买 DOGE，另一半买 BTC”或“卖掉一半 Tesla”。INJ Pass 的模型只把表达转换为
+白名单 typed tools；游戏服务端负责解析真实资产、生成精确预览并保存短期 `TradePlan`。
+交易必须在 INJ Pass 确认卡中批准并签署计划消息后才会原子执行，取消、过期、报价/余额/持仓
+变化都会阻止成交，同一计划重复提交也不会重复交易。
+
 本地联调端口：
 
 ```text

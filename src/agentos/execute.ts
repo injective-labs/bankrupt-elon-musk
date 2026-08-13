@@ -134,6 +134,24 @@ export async function executeElonAgentCommand(
       };
     }
 
+    if (command.action === "prepare_trade") {
+      if (!command.params.legs?.length) return { ok: false, key: "invalid_trade_plan" };
+      const plan = await api.prepareTradePlan(session, { legs: command.params.legs }, signal);
+      return { ok: true, key: "game_trade_preview", data: plan as unknown as Record<string, unknown> };
+    }
+
+    if (command.action === "execute_trade_plan") {
+      if (!command.params.planId || !command.params.confirmationMessage) return { ok: false, key: "invalid_trade_plan" };
+      const receipt = await api.executeTradePlan(session, command.params.planId, command.params.confirmationMessage, signal);
+      return { ok: true, key: "game_trade_plan", data: receipt as unknown as Record<string, unknown> };
+    }
+
+    if (command.action === "cancel_trade_plan") {
+      if (!command.params.planId) return { ok: false, key: "invalid_trade_plan" };
+      const cancelled = await api.cancelTradePlan(session, command.params.planId, signal);
+      return { ok: true, key: "game_trade_cancelled", data: cancelled as unknown as Record<string, unknown> };
+    }
+
     if (command.action === "buy" || command.action === "sell") {
       if (!command.params.asset?.trim()) return { ok: false, key: "missing_asset" };
       if (!command.params.quantity) return { ok: false, key: "missing_quantity" };

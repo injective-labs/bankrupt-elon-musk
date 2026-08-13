@@ -83,6 +83,54 @@ export interface TradeReceipt {
   createdAt: string;
 }
 
+export type TradePlanLeg =
+  | { side: "BUY"; asset: string; quantity: string }
+  | { side: "BUY"; asset: string; cashAmount: string }
+  | { side: "BUY"; asset: string; cashBps: number }
+  | { side: "SELL"; asset: string; quantity: string }
+  | { side: "SELL"; asset: string; positionBps: number }
+  | { side: "SELL"; category: string; positionBps: 10000 };
+
+export interface TradePlanPreviewLeg {
+  side: "BUY" | "SELL";
+  assetId: string;
+  ticker: string;
+  name: string;
+  quantity: DecimalString;
+  usdUnitPrice: DecimalString;
+  usdAmount: DecimalString;
+  cashBefore: DecimalString;
+  cashAfter: DecimalString;
+  quantityBefore: DecimalString;
+  quantityAfter: DecimalString;
+  costBasisBefore: DecimalString;
+  costBasisAfter: DecimalString;
+  marketDate: string;
+  requested: Record<string, string | number>;
+}
+
+export interface PreparedTradePlanView {
+  planId: string;
+  status: "PENDING";
+  expiresAt: string;
+  previewHash: string;
+  confirmationMessage: string;
+  preview: {
+    cashBefore: DecimalString;
+    cashAfter: DecimalString;
+    settlementLocked: false;
+    legs: TradePlanPreviewLeg[];
+  };
+}
+
+export interface TradePlanReceiptView {
+  planId: string;
+  cashBefore: DecimalString;
+  cashAfter: DecimalString;
+  executedAt: string;
+  legs: Array<TradePlanPreviewLeg & { transactionId: string }>;
+}
+
 export interface ResetReceipt {
   id: string;
   idempotencyKey: string;

@@ -34,6 +34,9 @@ describe("executeElonAgentCommand", () => {
     getTransactions: vi.fn(),
     getLeaderboard: vi.fn(),
     submitTrade: vi.fn(),
+    prepareTradePlan: vi.fn(),
+    executeTradePlan: vi.fn(),
+    cancelTradePlan: vi.fn(),
     clearAgentSession: vi.fn(),
   };
 
@@ -50,6 +53,19 @@ describe("executeElonAgentCommand", () => {
       costBasisBefore: "0", costBasisAfter: "500", marketDate: asset.marketDate,
       createdAt: "2026-08-12T01:00:00.000Z",
     });
+    api.prepareTradePlan.mockResolvedValue({
+      planId: "00000000-0000-4000-8000-000000000011",
+      status: "PENDING",
+      expiresAt: "2026-08-12T01:05:00.000Z",
+      previewHash: "a".repeat(64),
+      confirmationMessage: "confirm plan 11",
+      preview: {
+        cashBefore: "1000", cashAfter: "0", settlementLocked: false,
+        legs: [{ side: "BUY", assetId: "dogecoin-pack", ticker: "DOGE", name: "Dogecoin", quantity: "7142", usdUnitPrice: "0.07", usdAmount: "499.94", cashBefore: "1000", cashAfter: "500.06", quantityBefore: "0", quantityAfter: "7142", costBasisBefore: "0", costBasisAfter: "499.94", marketDate: asset.marketDate, requested: { cashBps: 5000 } }],
+      },
+    });
+    api.executeTradePlan.mockResolvedValue({ planId: "00000000-0000-4000-8000-000000000011", cashBefore: "1000", cashAfter: "500.06", executedAt: "2026-08-12T01:01:00.000Z", legs: [] });
+    api.cancelTradePlan.mockResolvedValue({ planId: "00000000-0000-4000-8000-000000000011", status: "CANCELLED" });
   });
 
   afterEach(() => {
@@ -101,6 +117,34 @@ describe("executeElonAgentCommand", () => {
       key: "game_rank",
       data: { rank: 1, total: 1, pnl: account.pnl, top: [] },
     });
+  });
+
+  it("prepares a typed multi-asset plan without executing a trade", async () => {
+    const legs = [
+      { side: "BUY" as const, asset: "DOGE", cashBps: 5000 },
+      { side: "BUY" as const, asset: "BTC", cashBps: 5000 },
+    ];
+    const result = await executeElonAgentCommand(command("prepare_trade", { legs }), {
+      api,
+      session: walletSession,
+    });
+    expect(api.prepareTradePlan).toHaveBeenCalledWith(walletSession, { legs }, undefined);
+    expect(api.executeTradePlan).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, key: "game_trade_preview", data: { planId: "00000000-0000-4000-8000-000000000011" } });
+  });
+
+  it("executes only a prepared plan using its server confirmation message", async () => {
+    const result = await executeElonAgentCommand(command("execute_trade_plan", {
+      planId: "00000000-0000-4000-8000-000000000011",
+      confirmationMessage: "confirm plan 11",
+    }), { api, session: walletSession });
+    expect(api.executeTradePlan).toHaveBeenCalledWith(
+      walletSession,
+      "00000000-0000-4000-8000-000000000011",
+      "confirm plan 11",
+      undefined,
+    );
+    expect(result).toMatchObject({ ok: true, key: "game_trade_plan", data: { planId: "00000000-0000-4000-8000-000000000011" } });
   });
 
   it.each([

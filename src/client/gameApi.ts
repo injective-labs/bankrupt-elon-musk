@@ -1,4 +1,4 @@
-import type { AccountProjection, ApiErrorBody, LeaderboardSnapshot, MarketProjection, TradeReceipt, TransactionView } from "@/types";
+import type { AccountProjection, ApiErrorBody, LeaderboardSnapshot, MarketProjection, PreparedTradePlanView, TradePlanLeg, TradePlanReceiptView, TradeReceipt, TransactionView } from "@/types";
 
 export interface SessionView { walletAddress: string; walletName: string | null }
 export interface AgentSessionView extends SessionView { accessToken: string; expiresIn: number }
@@ -70,6 +70,34 @@ function validAsset(value: unknown): boolean {
 
 function validTransaction(value: unknown): boolean {
   return record(value) && typeof value.id === "string" && ["BUY", "SELL", "RESET"].includes(String(value.type)) && stringOrNull(value.assetId) && (value.quantity === null || decimal(value.quantity)) && (value.usdUnitPrice === null || decimal(value.usdUnitPrice)) && decimal(value.usdAmount) && typeof value.createdAt === "string";
+}
+
+function validTradePlanPreviewLeg(value: unknown): boolean {
+  return record(value)
+    && (value.side === "BUY" || value.side === "SELL")
+    && ["assetId", "ticker", "name", "quantity", "usdUnitPrice", "usdAmount", "cashBefore", "cashAfter", "quantityBefore", "quantityAfter", "costBasisBefore", "costBasisAfter", "marketDate"].every((key) => typeof value[key] === "string")
+    && record(value.requested);
+}
+
+function preparedTradePlan(value: unknown): PreparedTradePlanView {
+  if (!record(value) || typeof value.planId !== "string" || value.status !== "PENDING"
+    || typeof value.expiresAt !== "string" || typeof value.previewHash !== "string"
+    || typeof value.confirmationMessage !== "string" || !record(value.preview)
+    || !decimal(value.preview.cashBefore) || !decimal(value.preview.cashAfter)
+    || value.preview.settlementLocked !== false || !Array.isArray(value.preview.legs)
+    || !value.preview.legs.every(validTradePlanPreviewLeg)) {
+    return invalidResponse("Trade plan response is malformed");
+  }
+  return value as unknown as PreparedTradePlanView;
+}
+
+function tradePlanReceipt(value: unknown): TradePlanReceiptView {
+  if (!record(value) || typeof value.planId !== "string" || !decimal(value.cashBefore)
+    || !decimal(value.cashAfter) || typeof value.executedAt !== "string"
+    || !Array.isArray(value.legs) || !value.legs.every((leg) => validTradePlanPreviewLeg(leg) && typeof (leg as Record<string, unknown>).transactionId === "string")) {
+    return invalidResponse("Trade plan receipt is malformed");
+  }
+  return value as unknown as TradePlanReceiptView;
 }
 
 function account(value: unknown): AccountProjection {
@@ -148,6 +176,13 @@ export async function logout(): Promise<void> {
 export const getGame = async (authorizationToken?: string, signal?: AbortSignal): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game", json("GET", undefined, authorizationToken, signal))));
 export const getMarket = async (signal?: AbortSignal): Promise<MarketProjection> => market(await response<unknown>(fetch("/api/market", json("GET", undefined, undefined, signal))));
 export const submitTrade = async (command: TradeInput, authorizationToken?: string, signal?: AbortSignal): Promise<TradeReceipt> => tradeReceipt(await response<unknown>(fetch("/api/trades", json("POST", command, authorizationToken, signal))));
+export const prepareTradePlan = async (legs: TradePlanLeg[], authorizationToken?: string, signal?: AbortSignal): Promise<PreparedTradePlanView> => preparedTradePlan(await response<unknown>(fetch("/api/trade-plans", json("POST", { legs }, authorizationToken, signal))));
+export const executeTradePlan = async (planId: string, signature: string, authorizationToken?: string, signal?: AbortSignal): Promise<TradePlanReceiptView> => tradePlanReceipt(await response<unknown>(fetch(`/api/trade-plans/${encodeURIComponent(planId)}/execute`, json("POST", { signature }, authorizationToken, signal))));
+export const cancelTradePlan = async (planId: string, authorizationToken?: string, signal?: AbortSignal): Promise<{ planId: string; status: "CANCELLED" }> => {
+  const value = await response<unknown>(fetch(`/api/trade-plans/${encodeURIComponent(planId)}/cancel`, json("POST", undefined, authorizationToken, signal)));
+  if (!record(value) || typeof value.planId !== "string" || value.status !== "CANCELLED") invalidResponse("Trade plan cancellation response is malformed");
+  return value as { planId: string; status: "CANCELLED" };
+};
 export const resetGame = async (idempotencyKey: string, authorizationToken?: string): Promise<AccountProjection> => account(await response<unknown>(fetch("/api/game/reset", json("POST", { idempotencyKey }, authorizationToken))));
 export const getTransactions = async (cursor?: string, limit = 50, authorizationToken?: string, signal?: AbortSignal): Promise<TransactionPage> => {
   const params = new URLSearchParams({ limit: String(limit) });

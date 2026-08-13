@@ -20,6 +20,13 @@ enum QuoteStatus {
   ERROR
 }
 
+enum TradePlanStatus {
+  PENDING
+  EXECUTED
+  CANCELLED
+  EXPIRED
+}
+
 model Player {
   walletAddress String        @id
   walletName    String?
@@ -30,6 +37,27 @@ model Player {
   positions     Position[]
   transactions  Transaction[]
   trades        TradeLog[]
+  tradePlans    TradePlan[]
+}
+
+model TradePlan {
+  id                  String          @id @db.Uuid
+  walletAddress       String
+  request             Json
+  preview             Json
+  previewHash         String
+  confirmationMessage String
+  status              TradePlanStatus @default(PENDING)
+  expiresAt           DateTime
+  receipt             Json?
+  executedAt          DateTime?
+  cancelledAt         DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  player              Player          @relation(fields: [walletAddress], references: [walletAddress], onDelete: Cascade)
+
+  @@index([walletAddress, status])
+  @@index([status, expiresAt])
 }
 
 model Position {
