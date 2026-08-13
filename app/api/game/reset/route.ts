@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/server/auth";
+import { authenticateGameRequest } from "@/server/auth";
 import { ApiError, toErrorResponse } from "@/server/http/errors";
 import { resetAccount } from "@/server/reset";
 
@@ -8,7 +8,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 
 export async function POST(request: Request) {
   try {
-    const walletAddress = await authenticateRequest(request);
+    const walletAddress = await authenticateGameRequest(request, "game:trade");
     let body: unknown;
     try { body = await request.json(); } catch { throw new ApiError(422, "INVALID_JSON", "Request body must be valid JSON"); }
     const idempotencyKey = isRecord(body) ? body.idempotencyKey : undefined;

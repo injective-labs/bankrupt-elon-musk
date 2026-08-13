@@ -102,9 +102,13 @@ node --experimental-strip-types scripts/fetch-asset-names.mts
 
 ## 云存档(连接钱包后)
 
-连接 INJ Pass 钱包后,游戏向同源后端登录(`/api/auth/nonce` → 钱包 EIP-191 签名 →
-`/api/auth/verify` 发 JWT),随后 `GET /api/state` 载入云端存档(有则覆盖本地,无则上推),
-之后状态变化去抖写回 `PUT /api/state`。可在钱包菜单手动「☁ 同步存档」(弹窗被拦截时重试)。
+连接 INJ Pass 钱包后，游戏通过服务端 nonce 和 EIP-191 签名验证钱包所有权。独立站调用
+`/api/auth/verify` 获取第一方 HttpOnly Cookie；运行在 INJ Pass iframe 中时调用
+`/api/auth/agent-verify` 获取仅存于内存的短期 scoped Bearer，避免依赖第三方 Cookie。
+余额、持仓、模拟成交和排行榜均以 Musk 服务端数据库为准。
+
+不同类型 dApp 的宿主 session、链上签名、服务端 Bearer、自定义宿主 RPC 和 Chat Agent
+选型见 [INJ Pass dApp 接入模式与选型](docs/INJPASS_DAPP_INTEGRATION_PATTERNS.md)。
 
 ## 连接 INJ Pass(仅钱包连接)
 

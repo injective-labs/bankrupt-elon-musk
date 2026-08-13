@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import * as defaultApi from "@/client/gameApi";
+import * as defaultApi from "@/client/runtimeGameApi";
 import type { MessageSigner, SessionView, TradeInput, TransactionPage } from "@/client/gameApi";
 import { ALL_SUBCATEGORY } from "@/data/categories";
 import { isSettlementLocked } from "@/game/marketClock";
@@ -268,9 +268,14 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   useEffect(() => {
     if (authStatus !== "authenticated") { setLeaderboard(null); setLeaderboardError(false); setLeaderboardStatus("idle"); return; }
     let active = true;
+    const epoch = epochRef.current;
     setLeaderboardError(false); setLeaderboardStatus("loading");
-    void Promise.resolve(api.getLeaderboard()).then((value) => { if (active && value) { setLeaderboard(value); setLeaderboardStatus("loaded"); } }).catch(() => { if (active) { setLeaderboard(null); setLeaderboardError(true); setLeaderboardStatus("error"); } });
+    void Promise.resolve(api.getLeaderboard()).then((value) => { if (active && value) { setLeaderboard(value); setLeaderboardStatus("loaded"); } }).catch((error: unknown) => {
+      if (!active) return;
+      if (errorInfo(error).expired) { fail(error, epoch); return; }
+      setLeaderboard(null); setLeaderboardError(true); setLeaderboardStatus("error");
+    });
     return () => { active = false; };
-  }, [api, authStatus, account?.updatedAt]);
+  }, [api, authStatus, account?.updatedAt, fail]);
   return <GameContext.Provider value={{ authStatus, account, market, marketStatus, marketError, clockNow, tradingLocked, leaderboard, leaderboardStatus, leaderboardError, state, actions, pendingCommand, pendingOperation, feedback, lastError, focusedProductId, flashTick: feedback?.id ?? 0, ready: authStatus !== "loading" }}>{children}</GameContext.Provider>;
 }

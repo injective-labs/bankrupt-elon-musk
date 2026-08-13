@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { GameProvider, useGame } from "@/state/GameProvider";
 import { InjPassProvider } from "@/wallet/InjPassProvider";
-import { t } from "@/i18n";
+import { errorText, t } from "@/i18n";
 import { TopBar } from "./TopBar";
 import { FxTicker } from "./FxTicker";
 import { SessionBar } from "./SessionBar";
@@ -15,7 +15,7 @@ import { InjPassAgentBridge } from "@/agentos/InjPassAgentBridge";
 import { HostWalletSessionGuard } from "@/wallet/HostWalletSessionGuard";
 
 export function GameShell() {
-  const { state, authStatus } = useGame();
+  const { state, authStatus, lastError } = useGame();
 
   useEffect(() => {
     document.documentElement.lang = state.locale === "en" ? "en" : "zh-CN";
@@ -25,7 +25,7 @@ export function GameShell() {
   return (
     <div className="app-shell" data-auth-state={authStatus}>
       <TopBar />
-      {authStatus === "expired" && <p role="alert">{t(state.locale, "error.UNAUTHORIZED")}</p>}
+      {authStatus === "expired" && <p role="alert">{errorText(state.locale, lastError ?? "UNAUTHORIZED")}</p>}
       <OperationToast />
       <FxTicker />
       <SessionBar />
