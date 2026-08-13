@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GameApiError } from "@/client/gameApi";
 import type { AssetView } from "@/types";
@@ -50,6 +50,10 @@ describe("executeElonAgentCommand", () => {
       costBasisBefore: "0", costBasisAfter: "500", marketDate: asset.marketDate,
       createdAt: "2026-08-12T01:00:00.000Z",
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("answers the host open handshake without requiring a wallet", async () => {
@@ -139,6 +143,60 @@ describe("executeElonAgentCommand", () => {
     expect(api.getGame).not.toHaveBeenCalled();
   });
 
+  it("uses the browser crypto receiver when generating a default trade id", async () => {
+    const browserCrypto = {
+      randomUUID(this: unknown) {
+        if (this !== browserCrypto) throw new TypeError("Illegal invocation");
+        return "00000000-0000-4000-8000-000000000009";
+      },
+    };
+    vi.stubGlobal("crypto", browserCrypto);
+
+    const result = await executeElonAgentCommand(
+      command("buy", { asset: "TSLA", quantity: "1" }),
+      { api, session: walletSession },
+    );
+
+    expect(result).toMatchObject({ ok: true, key: "game_trade" });
+    expect(api.submitTrade).toHaveBeenCalledWith(walletSession, {
+      assetId: asset.id,
+      side: "BUY",
+      quantity: "1",
+      idempotencyKey: "00000000-0000-4000-8000-000000000009",
+    }, undefined);
+  });
+
+  it.each([
+    ["tsla", "tesla-basket", "1"],
+    ["NVDA", "nvidia-basket", "2"],
+    ["btc", "bitcoin-coin", "MAX"],
+    ["doge", "dogecoin-pack", "MAX"],
+  ] as const)("buys %s through the generic catalogue path", async (input, assetId, quantity) => {
+    const assets = [
+      { ...asset, id: "tesla-basket", ticker: "TSLA" },
+      { ...asset, id: "nvidia-basket", ticker: "NVDA" },
+      { ...asset, id: "bitcoin-coin", ticker: "BTC" },
+      { ...asset, id: "dogecoin-pack", ticker: "DOGE" },
+    ];
+    api.getMarket.mockResolvedValueOnce({ assets, marketAsOf: asset.marketDate });
+
+    await executeElonAgentCommand(
+      command("buy", { asset: input, quantity }),
+      {
+        api,
+        session: walletSession,
+        randomUUID: () => "00000000-0000-4000-8000-000000000010",
+      },
+    );
+
+    expect(api.submitTrade).toHaveBeenCalledWith(walletSession, {
+      assetId,
+      side: "BUY",
+      quantity,
+      idempotencyKey: "00000000-0000-4000-8000-000000000010",
+    }, undefined);
+  });
+
   it("keeps a successful trade successful when the account projection is unavailable", async () => {
     api.getGame.mockRejectedValueOnce(new Error("projection unavailable"));
     const result = await executeElonAgentCommand(
@@ -215,7 +273,7 @@ describe("executeElonAgentCommand", () => {
   it("does not expose unknown internal errors", async () => {
     api.getGame.mockRejectedValueOnce(new Error("database password is secret"));
     const result = await executeElonAgentCommand(command("balance"), { api, session: walletSession });
-    expect(result).toEqual({ ok: false, key: "unknown_error", message: "The game command could not be completed." });
+    expect(result).toEqual({ ok: false, key: "unknown_error" });
     expect(JSON.stringify(result)).not.toContain("database password");
   });
 });

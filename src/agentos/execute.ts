@@ -48,6 +48,10 @@ function assertActive(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("The host session changed", "AbortError");
 }
 
+function createIdempotencyKey(randomUUID?: () => string): string {
+  return randomUUID ? randomUUID() : crypto.randomUUID();
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -146,7 +150,7 @@ export async function executeElonAgentCommand(
       }
 
       assertActive(signal);
-      const idempotencyKey = (dependencies.randomUUID ?? crypto.randomUUID)();
+      const idempotencyKey = createIdempotencyKey(dependencies.randomUUID);
       const receipt = await api.submitTrade(session, {
         assetId: resolution.asset.id,
         side: command.action === "buy" ? "BUY" : "SELL",
@@ -179,10 +183,6 @@ export async function executeElonAgentCommand(
     if (error instanceof GameApiError) {
       return { ok: false, key: ERROR_KEYS[error.code] ?? "unknown_error" };
     }
-    return {
-      ok: false,
-      key: "unknown_error",
-      message: "The game command could not be completed.",
-    };
+    return { ok: false, key: "unknown_error" };
   }
 }
