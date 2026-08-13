@@ -6,7 +6,6 @@ import { useEffect } from "react";
 import { createElonAgentApi } from "./api";
 import { executeElonAgentCommand } from "./execute";
 import {
-  destroyElonMiniAppConnector,
   getElonMiniAppConnector,
   trustedInjPassHostOrigin,
 } from "./host";
@@ -149,7 +148,6 @@ export function InjPassAgentBridge() {
       seenCommandIds.clear();
       unsubscribeSession();
       window.removeEventListener("message", handleMessage);
-      destroyElonMiniAppConnector();
     };
   }, []);
 

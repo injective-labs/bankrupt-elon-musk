@@ -13,11 +13,10 @@ function truncate(address: string): string {
 const LABELS = {
   connect: { zh: "连接 INJ Pass", en: "Connect INJ Pass" },
   connecting: { zh: "连接中…", en: "Connecting…" },
-  sign: { zh: "签名测试", en: "Sign test" },
-  signed: { zh: "签名成功", en: "Signed" },
+  authorize: { zh: "授权游戏", en: "Authorize game" },
+  authorizing: { zh: "授权中…", en: "Authorizing…" },
   disconnect: { zh: "断开", en: "Disconnect" },
   authenticated: { zh: "已认证", en: "Authenticated" },
-  loginRequired: { zh: "需要签名认证", en: "Signature required" },
   popupBlocked: {
     zh: "弹窗被拦截，请允许本站弹窗后重试。",
     en: "Popup blocked — allow popups for this site and retry.",
@@ -25,20 +24,17 @@ const LABELS = {
 };
 
 export function ConnectButton() {
-  const { status, wallet, error, disconnect, signMessage } = useInjPass();
+  const { status, wallet, error, disconnect } = useInjPass();
   const { state, authStatus, account, actions, pendingCommand } = useGame();
   const { beginLogin, busy } = useInjPassLogin();
   const locale = state.locale;
 
   const [open, setOpen] = useState(false);
-
   const label = (key: keyof typeof LABELS) => LABELS[key][locale];
 
   const identity = authStatus === "authenticated" && account
     ? { address: account.walletAddress, walletName: account.walletName }
-    : status === "connected" && wallet
-      ? { address: wallet.address, walletName: wallet.walletName }
-      : null;
+    : null;
 
   if (identity) {
     return (
@@ -58,22 +54,8 @@ export function ConnectButton() {
         {open && (
           <div className="wallet-menu" role="menu">
             <div className="wallet-status" role="status">
-              {label(authStatus === "authenticated" ? "authenticated" : "loginRequired")}
+              {label("authenticated")}
             </div>
-            {authStatus !== "authenticated" && wallet && (
-              <button
-                type="button"
-                role="menuitem"
-                disabled={pendingCommand === "login"}
-                onClick={() => void actions.login(wallet.address, wallet.walletName ?? null, async (message) => {
-                  const signature = await signMessage(message);
-                  if (!signature) throw new Error("SIGNATURE_REQUIRED");
-                  return signature;
-                })}
-              >
-                {label("sign")}
-              </button>
-            )}
             <button
               type="button"
               role="menuitem"
@@ -91,6 +73,25 @@ export function ConnectButton() {
             </button>
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (status === "connected" && wallet) {
+    const walletLabel = wallet.walletName || truncate(wallet.address);
+    return (
+      <div className="wallet-chip-wrap">
+        <button
+          className="icon-button wallet-connect"
+          type="button"
+          disabled={busy}
+          onClick={() => void beginLogin()}
+          title={`${walletLabel} · ${label("authorize")}`}
+        >
+          <span aria-hidden="true">🟣</span>
+          <span>{walletLabel} · {busy ? label("authorizing") : label("authorize")}</span>
+        </button>
+        {error && <div className="wallet-error">{error}</div>}
       </div>
     );
   }

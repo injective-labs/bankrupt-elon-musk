@@ -163,12 +163,12 @@ describe("InjPassAgentBridge", () => {
     }, state.origin);
   });
 
-  it("clears in-memory auth on wallet switch and destroys ownership on unmount", () => {
+  it("clears in-memory auth on wallet switch without destroying the shared connector", () => {
     const view = render(<InjPassAgentBridge />);
     act(() => state.sessionListener?.({ ...session, address: "0x0000000000000000000000000000000000000002" }));
     expect(state.clear).toHaveBeenCalledTimes(1);
     view.unmount();
-    expect(state.destroy).toHaveBeenCalledTimes(1);
+    expect(state.destroy).not.toHaveBeenCalled();
   });
 
   it("terminates an active old-wallet command once when the host wallet switches", async () => {

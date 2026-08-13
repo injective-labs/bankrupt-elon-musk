@@ -63,6 +63,7 @@ function Probe() {
     <button onClick={() => void game.actions.buyMax("asset")}>buy-max</button>
     <button onClick={() => void game.actions.sellAll("asset")}>sell-all</button>
     <button onClick={() => void game.actions.logout()}>logout</button>
+    <button onClick={() => void game.actions.invalidateSession()}>invalidate</button>
   </>;
 }
 
@@ -291,6 +292,52 @@ describe("GameProvider", () => {
     expect(game.authStatus).toBe("authenticated");
     expect(game.account?.cash).toBe("10");
     expect(game.lastError).toBe("LOGOUT_FAILED");
+  });
+
+  it("locks the local game immediately when a host mismatch invalidation cannot clear the cookie", async () => {
+    const client = api({
+      getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }),
+      getGame: vi.fn().mockResolvedValue(projection("10")),
+      logout: vi.fn().mockRejectedValue(new Error("LOGOUT_FAILED")),
+    });
+    render(<GameProvider api={client}><Probe /></GameProvider>);
+    await waitFor(() => expect(screen.getByTestId("cash")).toHaveTextContent("10"));
+
+    await act(async () => screen.getByText("invalidate").click());
+
+    expect(screen.getByTestId("status")).toHaveTextContent("locked");
+    expect(screen.getByTestId("cash")).toHaveTextContent("none");
+    expect(screen.getByTestId("error")).toHaveTextContent("LOGOUT_FAILED");
+  });
+
+  it("serializes host invalidation before a new wallet login", async () => {
+    const cleanupRequest = deferred<void>();
+    const client = api({
+      getSession: vi.fn().mockResolvedValue({ walletAddress: "0x1", walletName: null }),
+      getGame: vi.fn().mockResolvedValue(projection("10")),
+      logout: vi.fn().mockReturnValue(cleanupRequest.promise),
+      loginWithSignature: vi.fn().mockResolvedValue({ walletAddress: "0x2", walletName: null }),
+    });
+    let game!: ReturnType<typeof useGame>;
+    function Capture() { game = useGame(); return null; }
+    render(<GameProvider api={client}><Capture /></GameProvider>);
+    await waitFor(() => expect(game.authStatus).toBe("authenticated"));
+
+    let invalidation!: Promise<boolean>;
+    act(() => { invalidation = game.actions.invalidateSession(); });
+
+    expect(game.authStatus).toBe("locked");
+    expect(game.pendingCommand).toBe("logout");
+    await expect(game.actions.login("0x2", null, vi.fn())).rejects.toMatchObject({ code: "AUTH_TRANSITION_PENDING" });
+    expect(client.loginWithSignature).not.toHaveBeenCalled();
+
+    await act(async () => {
+      cleanupRequest.resolve();
+      await expect(invalidation).resolves.toBe(true);
+    });
+    expect(game.pendingCommand).toBeNull();
+    await act(async () => { await game.actions.login("0x2", null, vi.fn()); });
+    expect(client.loginWithSignature).toHaveBeenCalledOnce();
   });
 
   it("keeps dismissFeedback stable across provider rerenders", async () => {

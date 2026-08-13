@@ -12,6 +12,7 @@ import { MarketPanel } from "./MarketPanel";
 import { GuestPortfolioPanel } from "./GuestPortfolioPanel";
 import { OperationToast } from "./OperationToast";
 import { InjPassAgentBridge } from "@/agentos/InjPassAgentBridge";
+import { HostWalletSessionGuard } from "@/wallet/HostWalletSessionGuard";
 
 export function GameShell() {
   const { state, authStatus } = useGame();
@@ -41,7 +42,9 @@ export function GameApp() {
     <InjPassProvider>
       <GameProvider>
         <InjPassAgentBridge />
-        <GameShell />
+        <HostWalletSessionGuard>
+          <GameShell />
+        </HostWalletSessionGuard>
       </GameProvider>
     </InjPassProvider>
   );

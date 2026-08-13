@@ -65,6 +65,7 @@ function errorInfo(error: unknown): { code: string; expired: boolean } {
 export interface GameActions {
   login(address: string, walletName: string | null, signer: MessageSigner): Promise<boolean>;
   logout(): Promise<boolean>;
+  invalidateSession(): Promise<boolean>;
   buy(id: string): Promise<void>; buyQty(id: string, quantity: string): Promise<void>; buyMax(id: string): Promise<void>;
   sell(id: string): Promise<void>; sellQty(id: string, quantity: string): Promise<void>; sellAll(id: string): Promise<void>;
   reset(): Promise<void>; refreshPricesNow(): Promise<void>; retryMarket(): Promise<void>;
@@ -196,6 +197,35 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
   }, [trade]);
   const dismissFeedback = useCallback(() => setFeedback(null), []);
 
+  const invalidateSession = useCallback(async () => {
+    const transition = Symbol("host-invalidation");
+    const epoch = ++epochRef.current;
+    authTransitionRef.current = transition;
+    const token = { kind: "logout" as const, epoch };
+    pendingRef.current = token;
+    setPendingCommand("logout");
+    setPendingOperation({ kind: "logout" });
+    setAccount(null);
+    setAuthStatus("locked");
+    setLastError(null);
+    try {
+      await api.logout();
+      return true;
+    } catch (error) {
+      if (mountedRef.current && epoch === epochRef.current) {
+        setLastError(errorInfo(error).code);
+      }
+      return false;
+    } finally {
+      if (authTransitionRef.current === transition) authTransitionRef.current = null;
+      if (pendingRef.current === token) {
+        pendingRef.current = null;
+        setPendingCommand(null);
+        setPendingOperation(null);
+      }
+    }
+  }, [api]);
+
   const actions = useMemo<GameActions>(() => ({
     login: async (address, walletName, signer) => {
       if (authTransitionRef.current) throw Object.assign(new Error("Authentication transition already pending"), { code: "AUTH_TRANSITION_PENDING" });
@@ -221,6 +251,7 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
       catch (error) { if (epoch === epochRef.current) fail(error, epoch, { kind: "logout" }); return false; }
       finally { if (authTransitionRef.current === transition) authTransitionRef.current = null; if (pendingRef.current === token) { pendingRef.current = null; setPendingCommand(null); setPendingOperation(null); } }
     },
+    invalidateSession,
     buy: (id) => explicitQuantity(id, "BUY", "1"), buyQty: (id, amount) => explicitQuantity(id, "BUY", amount),
     buyMax: (id) => trade(id, "BUY", "MAX"),
     sell: (id) => explicitQuantity(id, "SELL", "1"), sellQty: (id, amount) => explicitQuantity(id, "SELL", amount), sellAll: (id) => trade(id, "SELL", "MAX"),
@@ -229,7 +260,7 @@ export function GameProvider({ children, api = defaultApi }: { children: ReactNo
     toggleSound: () => setPreferences((p) => ({ ...p, sound: !p.sound })), toggleLocale: () => setPreferences((p) => ({ ...p, locale: p.locale === "zh" ? "en" : "zh" })),
     setCategory: (selectedCategory) => setPreferences((p) => ({ ...p, selectedCategory, selectedSubcategory: ALL_SUBCATEGORY })), setSubcategory: (selectedSubcategory) => setPreferences((p) => ({ ...p, selectedSubcategory })), setSearch: (search) => setPreferences((p) => ({ ...p, search })), setSort: (sort) => setPreferences((p) => ({ ...p, sort })),
     focusProduct: (id) => { setFocusedProductId(id); requestAnimationFrame(() => document.querySelector(`[data-product-id="${id}"]`)?.scrollIntoView?.({ block: "center" })); },
-  }), [api, command, dismissFeedback, explicitQuantity, fail, loadGame, loadMarket, trade]);
+  }), [api, command, dismissFeedback, explicitQuantity, fail, invalidateSession, loadGame, loadMarket, trade]);
 
   const state = useMemo(() => projectionState(preferences), [preferences]);
   useEffect(() => { const update = () => setClockNow(new Date()); update(); const id = setInterval(update, 1000); return () => clearInterval(id); }, []);
