@@ -1,3 +1,5 @@
+import { CURRENCY } from "@/config/currency";
+
 import type { Locale } from "@/types";
 
 // UI strings, ported verbatim from script.js.
@@ -70,7 +72,7 @@ export const I18N: Record<Locale, Record<string, string>> = {
     soundOff: "音效关",
     reset: "重置",
     resetDialogTitle: "确认重置账户",
-    resetDialogText: "重置账户会扣除你在 INJ Pass 中的 1 个 LAM，是否继续？",
+    resetDialogText: `重置账户会扣除你在 INJ Pass 中的 ${CURRENCY.resetCost} ${CURRENCY.symbol}，是否继续？`,
     resetDialogYes: "是",
     resetDialogNo: "否",
     language: "中文",
@@ -210,7 +212,7 @@ export const I18N: Record<Locale, Record<string, string>> = {
     soundOff: "Sound Off",
     reset: "Reset",
     resetDialogTitle: "Reset account?",
-    resetDialogText: "Resetting the account will deduct 1 LAM from your INJ Pass. Continue?",
+    resetDialogText: `Resetting the account will deduct ${CURRENCY.resetCost} ${CURRENCY.symbol} from your INJ Pass. Continue?`,
     resetDialogYes: "Yes",
     resetDialogNo: "No",
     language: "English",
